@@ -9,14 +9,21 @@ import {
   type SceneSnapshot,
 } from '../shared/index.js';
 import {
-  STANDALONE_GLB_ALIGNMENT,
   disposeVenueScene,
+  getGlbAlignmentForScene,
   getUploadedGlbBytesForScene,
   getUploadedGlbGroupForScene,
   type VenueViewportProps,
 } from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
 import { computeAttendeeSampleVisibilityMask } from './localEvaluatorFallback.js';
+import {
+  AuditoriumControlPanel,
+  DEFAULT_AUDITORIUM_LOOK_SETTINGS,
+  applyLookSettingsToScene,
+  type AuditoriumLookSettings,
+  type CameraPresetSpec,
+} from './AuditoriumControlPanel.js';
 
 export type ViewportCameraMode = 'overview' | 'attendee_pov' | 'flythrough';
 
@@ -52,6 +59,10 @@ export function VenueViewportStage({
   const [selectedEmptyPlaceId, setSelectedEmptyPlaceId] = useState<
     string | null
   >(null);
+  const [lookSettings, setLookSettings] = useState<AuditoriumLookSettings>(
+    DEFAULT_AUDITORIUM_LOOK_SETTINGS,
+  );
+  const [hideAllUi, setHideAllUi] = useState<boolean>(false);
   const [flyHudReadout, setFlyHudReadout] = useState<{
     pos: [number, number, number];
     turbo: boolean;
@@ -351,18 +362,15 @@ export function VenueViewportStage({
         '',
         (gltf) => {
           if (cancelled || sceneRef.current !== scene) return;
+          const align = getGlbAlignmentForScene(snapshot.sceneId);
           const archGroup = gltf.scene;
           archGroup.name = 'uploaded_glb_architectural_shell';
-          archGroup.rotation.y = STANDALONE_GLB_ALIGNMENT.rotationYRad;
-          archGroup.scale.set(
-            STANDALONE_GLB_ALIGNMENT.scale,
-            STANDALONE_GLB_ALIGNMENT.scale,
-            STANDALONE_GLB_ALIGNMENT.scale,
-          );
+          archGroup.rotation.y = align.rotationYRad;
+          archGroup.scale.set(align.scale, align.scale, align.scale);
           archGroup.position.set(
-            STANDALONE_GLB_ALIGNMENT.position[0],
-            STANDALONE_GLB_ALIGNMENT.position[1],
-            STANDALONE_GLB_ALIGNMENT.position[2],
+            align.position[0],
+            align.position[1],
+            align.position[2],
           );
           scene.add(archGroup);
           renderFrameRef.current?.();
@@ -383,6 +391,8 @@ export function VenueViewportStage({
         const obj = snapshot.objects.find((o) => o.id === place.objectId);
         if (!obj) continue;
 
+        const tierY =
+          place.kind === 'chair' ? Math.max(0, place.seatHeightM - 0.45) : 0;
         const occupant = occupantByPlaceId.get(place.id);
         const isSelectedOccupant =
           occupant && occupant.attendeeId === selectedAttendeeId;
@@ -417,7 +427,7 @@ export function VenueViewportStage({
         ringMesh.rotation.x = -Math.PI / 2;
         ringMesh.position.set(
           obj.transform.position[0],
-          obj.transform.position[1] + 0.03,
+          obj.transform.position[1] + tierY + 0.03,
           obj.transform.position[2],
         );
         ringMesh.userData = {
@@ -437,7 +447,7 @@ export function VenueViewportStage({
         const hitMesh = new THREE.Mesh(hitGeo, hitMat);
         hitMesh.position.set(
           obj.transform.position[0],
-          obj.transform.position[1] + 0.25,
+          obj.transform.position[1] + tierY + 0.25,
           obj.transform.position[2],
         );
         hitMesh.userData = {
@@ -814,6 +824,54 @@ export function VenueViewportStage({
           </span>
         </div>
       )}
+
+      {/* Interactive Look-Dev Control Panel (Lighting, Textures, Camera Angles, Copy Settings as JSON) */}
+      <AuditoriumControlPanel
+        settings={lookSettings}
+        onChange={(next) => {
+          setLookSettings(next);
+          if (sceneRef.current) {
+            applyLookSettingsToScene(sceneRef.current, next);
+          }
+          if (rendererRef.current) {
+            rendererRef.current.toneMappingExposure = next.camera.exposure;
+          }
+          renderFrameRef.current?.();
+        }}
+        onSelectCameraPreset={(preset: CameraPresetSpec) => {
+          const [px, py, pz] = preset.position;
+          const [tx, ty, tz] = preset.lookAt;
+          const dx = tx - px;
+          const dy = ty - py;
+          const dz = tz - pz;
+          const dist = Math.max(0.01, Math.hypot(dx, dy, dz));
+          const yaw = Math.atan2(-dx, -dz);
+          const pitch = Math.asin(Math.max(-0.95, Math.min(0.95, dy / dist)));
+          flyPoseRef.current = {
+            position: [px, py, pz],
+            yawRad: yaw,
+            pitchRad: pitch,
+          };
+          setFlyHudReadout({
+            pos: [px, py, pz],
+            turbo: false,
+          });
+          onToggleViewMode('flythrough');
+          renderFrameRef.current?.();
+        }}
+        onCaptureCleanScreenshot={() => {
+          renderFrameRef.current?.();
+          const canvas = rendererRef.current?.domElement;
+          if (!canvas) return;
+          const dataUrl = canvas.toDataURL('image/png');
+          const a = document.createElement('a');
+          a.href = dataUrl;
+          a.download = `${lookSettings.camera.activePresetId}_clean_capture.png`;
+          a.click();
+        }}
+        onHideAllUiChange={setHideAllUi}
+        hideAllUi={hideAllUi}
+      />
 
       {/* Interactive 3D Canvas Container */}
       <div

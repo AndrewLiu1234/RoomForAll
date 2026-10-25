@@ -107,6 +107,25 @@ export function populateThreeSceneFromSnapshot(
 
   if (standaloneGlbGroup) {
     scene.add(standaloneGlbGroup.clone(true));
+
+    // Also render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
+    const target = snapshot.target;
+    const targetOutlineGroup = new THREE.Group();
+    targetOutlineGroup.position.set(
+      target.center[0],
+      target.center[1],
+      target.center[2] + 0.015,
+    );
+    targetOutlineGroup.rotation.y = target.yawDeg * DEG_TO_RAD;
+    const planeGeo = new THREE.PlaneGeometry(target.widthM, target.heightM);
+    const edgesGeo = new THREE.EdgesGeometry(planeGeo);
+    const edgesMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.85,
+    });
+    targetOutlineGroup.add(new THREE.LineSegments(edgesGeo, edgesMat));
+    scene.add(targetOutlineGroup);
   } else if (!isStandaloneGlb) {
     // Room floor
     const roomWidth = snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0];

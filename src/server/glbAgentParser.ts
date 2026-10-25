@@ -209,22 +209,54 @@ export function runLocalStageAndScreenSpecialist(
   for (const n of descriptor.nodes) {
     const lower = n.name.toLowerCase();
     const [sx, sy, sz] = n.sizeWorld;
-    const [px, , pz] = n.positionWorld;
+    const [px, py, pz] = n.positionWorld;
+
+    // Exclude small rails, tracks, trays, erasers, laptop lids, touchpanels, easels, and ceiling projector mounts
+    if (
+      lower.startsWith('obs_') ||
+      lower.includes('easel') ||
+      lower.includes('laptop') ||
+      lower.includes('touchpanel') ||
+      lower.includes('track') ||
+      lower.includes('tray') ||
+      lower.includes('eraser') ||
+      lower.includes('jamb') ||
+      lower.includes('frame_') ||
+      lower.includes('border_') ||
+      lower.includes('endcap') ||
+      lower.includes('hanger') ||
+      lower.includes('valence') ||
+      lower.includes('tension_bar') ||
+      lower.includes('roller') ||
+      lower.includes('projector_')
+    ) {
+      continue;
+    }
+
+    const horizSpan = Math.max(sx, sz);
+    const depthSpan = Math.min(sx, sz);
 
     if (
-      lower.includes('target') ||
-      lower.includes('screen') ||
-      lower.includes('projector') ||
-      lower.includes('board') ||
-      (sx < 1.2 && sy >= 2.0 && sz >= 3.0)
+      lower.startsWith('target_') ||
+      ((lower.includes('projscreen') ||
+        lower.includes('projection_screen') ||
+        lower.includes('active_surface') ||
+        (lower.includes('whiteboard') && lower.includes('surface')) ||
+        (lower.includes('chalkboard') && lower.includes('surface')) ||
+        lower.includes('screen') ||
+        (sx < 1.2 && sy >= 2.0 && sz >= 3.0)) &&
+        horizSpan >= 1.1 &&
+        sy >= 0.75 &&
+        depthSpan <= 0.65 &&
+        py >= 0.9)
     ) {
       assignedNodes.push({
         nodeIndex: n.nodeIndex,
         role: 'presentation_screen',
-        confidence: 0.95,
-        reasoning: `Vertical high-aspect presentation surface [${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)}m] at [${px.toFixed(1)}, ${pz.toFixed(1)}].`,
+        confidence: lower.includes('projscreen') ? 0.99 : 0.95,
+        reasoning: `Primary Sight Target surface (${n.name}) [${horizSpan.toFixed(2)}×${sy.toFixed(2)}m] at [${px.toFixed(2)}, ${py.toFixed(2)}, ${pz.toFixed(2)}].`,
       });
-      if (Math.abs(px) > Math.abs(pz)) {
+      if (Math.abs(px) > Math.abs(pz) && Math.abs(px) > 3.5) {
         detectedStageAxis = px > 0 ? '+X' : '-X';
       } else {
         detectedStageAxis = pz < 0 ? '-Z' : '+Z';
@@ -251,7 +283,7 @@ export function runLocalStageAndScreenSpecialist(
     latencyMs,
     assignedNodes,
     detectedStageAxis,
-    summary: `Detected stage & screen along ${detectedStageAxis} axis (${assignedNodes.length} focal node(s)).`,
+    summary: `SightTargetAgent identified ${assignedNodes.filter((a) => a.role === 'presentation_screen').length} primary screen/board surface(s) & ${assignedNodes.filter((a) => a.role === 'stage').length} stage(s) along ${detectedStageAxis}.`,
   };
 }
 
@@ -399,8 +431,8 @@ export async function runParallelGeminiGlbAgents(
 ): Promise<ParallelGlbAgentResponse> {
   const overallStartMs = performance.now();
   const apiKey = options.apiKey ?? process.env.GEMINI_API_KEY ?? '';
-  const fastModel = options.model ?? 'gemini-2.5-flash';
-  const timeoutMs = options.timeoutMs ?? 2200;
+  const fastModel = options.model ?? 'gemini-4-argon';
+  const timeoutMs = options.timeoutMs ?? 5500;
 
   // Always compute instant local specialist results in parallel as baseline/fallback
   const localSeat = runLocalSeatClusterSpecialist(descriptor);

@@ -146,18 +146,31 @@ interface RawGlbBufferView {
   byteStride?: number;
 }
 
+export interface GlbSceneAlignment {
+  rotationYRad: number;
+  scale: number;
+  position: Vec3;
+}
+
 /**
  * Alignment transform applied to merged-mesh architectural `.glb` files whose stage is at +X
  * (such as `room.glb`) so their stage aligns with VenuePilot's -Z stage convention (`yaw = 0°` faces `-Z`).
  */
-export const STANDALONE_GLB_ALIGNMENT = {
+export const STANDALONE_GLB_ALIGNMENT: GlbSceneAlignment = {
   rotationYRad: Math.PI / 2,
   scale: 0.68,
   position: [0.0, 0.02, 0.8] as Vec3,
-} as const;
+};
+
+export const IDENTITY_GLB_ALIGNMENT: GlbSceneAlignment = {
+  rotationYRad: 0,
+  scale: 1.0,
+  position: [0.0, 0.0, 0.0] as Vec3,
+};
 
 const uploadedGlbBufferBySceneId = new Map<string, Uint8Array>();
 const uploadedGlbGroupBySceneId = new Map<string, THREE.Group>();
+const glbAlignmentBySceneId = new Map<string, GlbSceneAlignment>();
 const standaloneGlbSceneIds = new Set<string>();
 
 export function getUploadedGlbBytesForScene(
@@ -170,6 +183,10 @@ export function getUploadedGlbGroupForScene(
   sceneId: string,
 ): THREE.Group | undefined {
   return uploadedGlbGroupBySceneId.get(sceneId);
+}
+
+export function getGlbAlignmentForScene(sceneId: string): GlbSceneAlignment {
+  return glbAlignmentBySceneId.get(sceneId) ?? IDENTITY_GLB_ALIGNMENT;
 }
 
 export function isStandaloneUploadedGlbScene(sceneId: string): boolean {
@@ -277,6 +294,7 @@ function classifyNodeRole(
   extras: Record<string, unknown> | undefined,
   pos: Vec3,
   size: Vec3,
+  allowBoxSeatFallback = false,
 ): AutoLabeledNodeRole {
   const lower = name.toLowerCase();
   const extraCat =
@@ -287,7 +305,19 @@ function classifyNodeRole(
     lower.includes('slab') ||
     lower.includes('ceiling') ||
     lower.includes('roof') ||
-    lower.includes('shell')
+    lower.includes('shell') ||
+    lower.includes('tier_') ||
+    lower.includes('riser') ||
+    lower.includes('stair') ||
+    lower.includes('step_') ||
+    lower.includes('wall') ||
+    lower.includes('window') ||
+    lower.includes('clerestory') ||
+    lower.includes('mullion') ||
+    lower.includes('tie_') ||
+    lower.includes('pier') ||
+    lower.includes('desk_tier') ||
+    lower.includes('ada_bay')
   ) {
     return 'floor_or_shell';
   }
@@ -301,9 +331,33 @@ function classifyNodeRole(
     return 'exit_or_entrance';
   }
   if (
+    extraCat === 'movable_prop' ||
+    lower.startsWith('obs_') ||
+    lower.includes('prop') ||
+    lower.includes('sign') ||
+    lower.includes('table') ||
+    lower.includes('cart') ||
+    lower.includes('stand') ||
+    lower.includes('lectern') ||
+    lower.includes('easel') ||
+    lower.includes('kiosk') ||
+    lower.includes('tripod') ||
+    lower.includes('backpack') ||
+    lower.includes('dualbin') ||
+    lower.includes('recycle') ||
+    lower.includes('trash') ||
+    lower.includes('student_laptop')
+  ) {
+    return 'movable_prop';
+  }
+  if (
     lower.includes('target') ||
+    lower.includes('projscreen') ||
+    lower.includes('projection_screen') ||
+    lower.includes('active_surface') ||
+    lower.includes('whiteboard_panel') ||
+    lower.includes('chalkboard_panel') ||
     lower.includes('screen') ||
-    lower.includes('projector') ||
     lower.includes('board') ||
     lower.includes('slide')
   ) {
@@ -313,8 +367,7 @@ function classifyNodeRole(
     extraCat === 'stage' ||
     lower.includes('stage') ||
     lower.includes('podium') ||
-    lower.includes('dais') ||
-    lower.includes('platform')
+    lower.includes('dais')
   ) {
     return 'stage';
   }
@@ -322,8 +375,7 @@ function classifyNodeRole(
     extraCat === 'wheelchair_bay_frame' ||
     lower.includes('bay_wc') ||
     lower.includes('wheelchair') ||
-    lower.includes('accessible_bay') ||
-    lower.includes('ada_bay')
+    lower.includes('accessible_bay')
   ) {
     return 'wheelchair_bay';
   }
@@ -337,24 +389,9 @@ function classifyNodeRole(
     return 'seat';
   }
   if (
-    extraCat === 'movable_prop' ||
-    lower.includes('prop') ||
-    lower.includes('sign') ||
-    lower.includes('table') ||
-    lower.includes('cart') ||
-    lower.includes('stand') ||
-    lower.includes('lectern') ||
-    lower.includes('easel') ||
-    lower.includes('kiosk')
-  ) {
-    return 'movable_prop';
-  }
-  if (
     extraCat === 'fixed_structure' ||
     lower.includes('pillar') ||
     lower.includes('column') ||
-    lower.includes('wall') ||
-    lower.includes('partition') ||
     lower.includes('post')
   ) {
     return 'pillar_or_structure';
@@ -364,6 +401,7 @@ function classifyNodeRole(
     return 'floor_or_shell';
   }
   if (
+    allowBoxSeatFallback &&
     size[0] >= 0.35 &&
     size[0] <= 0.85 &&
     size[1] >= 0.4 &&
@@ -374,7 +412,167 @@ function classifyNodeRole(
     return 'seat';
   }
 
-  return 'pillar_or_structure';
+  return 'floor_or_shell';
+}
+
+/**
+ * SightTargetAgent: Determines where the people in the parsed seats should actually be looking
+ * (whether it is a dropdown projector screen, a main whiteboard/chalkboard surface, or a stage).
+ * Strictly filters out tiny rails, tracks, chalk trays, erasers, rollers, laptop screens, and ceiling mounts.
+ */
+function selectBestSightTargetAgent(params: {
+  labeledNodes: AutoLabeledGlbNode[];
+  seatNodes: AutoLabeledGlbNode[];
+  stageNode?: AutoLabeledGlbNode;
+  roomBounds: { min: Vec3; max: Vec3 };
+}): {
+  id: string;
+  label: string;
+  center: Vec3;
+  yawDeg: number;
+  widthM: number;
+  heightM: number;
+} {
+  const { labeledNodes, seatNodes, stageNode, roomBounds } = params;
+
+  const avgSeatX =
+    seatNodes.length > 0
+      ? seatNodes.reduce((s, n) => s + n.positionWorld[0], 0) / seatNodes.length
+      : 0;
+  const minSeatZ =
+    seatNodes.length > 0
+      ? Math.min(...seatNodes.map((n) => n.positionWorld[2]))
+      : 0;
+
+  // Score all candidate vertical presentation surfaces (projector screens, whiteboards, chalkboards, stage backdrops)
+  let bestCandidate: {
+    node: AutoLabeledGlbNode;
+    score: number;
+    widthM: number;
+    heightM: number;
+  } | null = null;
+
+  for (const n of labeledNodes) {
+    const lower = n.name.toLowerCase();
+    // Ignore movable easels, laptop lids, touchpanels, ceiling projector hardware, frames, tracks, and trays
+    if (
+      lower.startsWith('obs_') ||
+      lower.includes('easel') ||
+      lower.includes('laptop') ||
+      lower.includes('touchpanel') ||
+      lower.includes('track') ||
+      lower.includes('tray') ||
+      lower.includes('eraser') ||
+      lower.includes('jamb') ||
+      lower.includes('frame_') ||
+      lower.includes('border_') ||
+      lower.includes('endcap') ||
+      lower.includes('hanger') ||
+      lower.includes('valence') ||
+      lower.includes('tension_bar') ||
+      lower.includes('roller') ||
+      lower.includes('projector_')
+    ) {
+      continue;
+    }
+
+    const horizSpan = Math.max(n.sizeWorld[0], n.sizeWorld[2]);
+    const depthSpan = Math.min(n.sizeWorld[0], n.sizeWorld[2]);
+    const heightSpan = n.sizeWorld[1];
+
+    // Must be a genuine vertical viewing surface (at least 1.1m wide and 0.75m tall, or explicitly named target_*)
+    const isExplicitTarget = lower.startsWith('target_');
+    if (!isExplicitTarget && (horizSpan < 1.1 || heightSpan < 0.75 || depthSpan > 0.65)) {
+      continue;
+    }
+    if (!isExplicitTarget && n.positionWorld[1] < 0.9) {
+      continue;
+    }
+
+    const area = horizSpan * heightSpan;
+    let score = area * 10;
+
+    // Semantic priority: Active Projection Screen > Main Target > Center Whiteboard Surface > Chalkboard Surface
+    if (
+      lower.includes('projscreen') &&
+      (lower.includes('active_surface') || lower.includes('fabric_backing'))
+    ) {
+      score += 500;
+      if (lower.includes('active_surface')) score += 120;
+    } else if (isExplicitTarget || lower.includes('projection_screen')) {
+      score += 450;
+    } else if (
+      lower.includes('whiteboard') &&
+      lower.includes('surface')
+    ) {
+      score += 320;
+    } else if (
+      lower.includes('chalkboard') &&
+      lower.includes('surface')
+    ) {
+      score += 260;
+    } else if (n.role === 'presentation_screen') {
+      score += 180;
+    } else {
+      continue;
+    }
+
+    // Bonus for being in front of the first row of seats (along -Z gaze direction)
+    if (n.positionWorld[2] <= minSeatZ - 0.5) {
+      score += 100;
+    }
+    // Bonus for being horizontally centered with the seating bowl
+    score -= Math.abs(n.positionWorld[0] - avgSeatX) * 12;
+
+    if (!bestCandidate || score > bestCandidate.score) {
+      bestCandidate = {
+        node: n,
+        score,
+        widthM: Number(Math.max(1.4, horizSpan).toFixed(3)),
+        heightM: Number(Math.max(0.9, heightSpan).toFixed(3)),
+      };
+    }
+  }
+
+  if (bestCandidate) {
+    const chosen = bestCandidate.node;
+    return {
+      id: chosen.name,
+      label: `Sight Target (${chosen.name})`,
+      center: chosen.positionWorld,
+      yawDeg: 180,
+      widthM: bestCandidate.widthM,
+      heightM: bestCandidate.heightM,
+    };
+  }
+
+  if (stageNode) {
+    return {
+      id: `target_stage_${stageNode.name}`,
+      label: `Stage Sight Target (${stageNode.name})`,
+      center: [
+        stageNode.positionWorld[0],
+        Number((stageNode.positionWorld[1] + 1.8).toFixed(2)),
+        stageNode.positionWorld[2],
+      ],
+      yawDeg: 180,
+      widthM: Number(Math.max(2.4, stageNode.sizeWorld[0] * 0.6).toFixed(2)),
+      heightM: 1.5,
+    };
+  }
+
+  return {
+    id: 'target_auto_screen',
+    label: 'Auto-Detected Stage / Screen Sight Target',
+    center: [
+      Number(avgSeatX.toFixed(2)),
+      2.2,
+      Number((roomBounds.min[2] + 1.2).toFixed(2)),
+    ],
+    yawDeg: 180,
+    widthM: 3.0,
+    heightM: 1.6,
+  };
 }
 
 /**
@@ -1029,6 +1227,10 @@ export function parseAndLabelGlbVenue(
     });
 
     uploadedGlbBufferBySceneId.set(standaloneSnapshot.sceneId, glbBytes);
+    glbAlignmentBySceneId.set(
+      standaloneSnapshot.sceneId,
+      STANDALONE_GLB_ALIGNMENT,
+    );
     standaloneGlbSceneIds.add(standaloneSnapshot.sceneId);
 
     return {
@@ -1051,7 +1253,7 @@ export function parseAndLabelGlbVenue(
     };
   }
 
-  // Case B: Node-separated .glb model with explicit chair/seat nodes
+  // Case B: Node-separated .glb model with explicit chair/seat nodes (e.g. `smallClassroom.glb`, `custom-civic-auditorium-16.glb`)
   let minX = -6.0;
   let maxX = 6.0;
   let maxY = 4.2;
@@ -1075,7 +1277,6 @@ export function parseAndLabelGlbVenue(
     ] as Vec3,
   };
 
-  const screenNode = labeledNodes.find((n) => n.role === 'presentation_screen');
   const stageNode = labeledNodes.find((n) => n.role === 'stage');
   const exitNodes = labeledNodes.filter((n) => n.role === 'exit_or_entrance');
   const seatNodes = labeledNodes.filter((n) => n.role === 'seat');
@@ -1083,8 +1284,16 @@ export function parseAndLabelGlbVenue(
   const pillarNodes = labeledNodes.filter(
     (n) => n.role === 'pillar_or_structure',
   );
-  const propNodes = labeledNodes.filter((n) => n.role === 'movable_prop');
+  const rawPropNodes = labeledNodes.filter((n) => n.role === 'movable_prop');
   const shellNodes = labeledNodes.filter((n) => n.role === 'floor_or_shell');
+
+  // Use SightTargetAgent to locate the true primary screen, projector screen, whiteboard/chalkboard, or stage
+  const resolvedTarget = selectBestSightTargetAgent({
+    labeledNodes,
+    seatNodes,
+    stageNode,
+    roomBounds,
+  });
 
   const objects: SceneObject[] = [];
   const places: AudiencePlace[] = [];
@@ -1148,90 +1357,205 @@ export function parseAndLabelGlbVenue(
     });
   }
 
-  for (const prop of propNodes) {
-    const blocksVis = prop.sizeWorld[1] >= 1.0;
+  // Group multi-part obstacles (e.g. `Obs_Rolling_Whiteboard_Easel_*`, `Obs_Mobile_AV_Cart_*`)
+  // into single composite movable_prop SceneObjects when not in standalone mode, or keep only
+  // non-overlapping top-level props so multi-part CAD sub-nodes never collide with each other.
+  const propGroups = new Map<
+    string,
+    {
+      id: string;
+      minX: number;
+      maxX: number;
+      minY: number;
+      maxY: number;
+      minZ: number;
+      maxZ: number;
+      yawDeg: number;
+    }
+  >();
+
+  for (const prop of rawPropNodes) {
+    const lower = prop.name.toLowerCase();
+    // Skip non-movable fixed lectern/student-laptop decorative sub-parts in standalone classroom scenes
+    if (
+      standaloneRandomFour &&
+      (lower.startsWith('lectern_') ||
+        lower.startsWith('student_laptop_') ||
+        lower.startsWith('obs_student_backpack') ||
+        lower.startsWith('obs_aisle_backpacks') ||
+        lower.startsWith('obs_dualbin') ||
+        lower.startsWith('obs_lecture_capture_tripod'))
+    ) {
+      continue;
+    }
+
+    let groupKey = prop.name;
+    if (lower.startsWith('obs_rolling_whiteboard_easel')) {
+      groupKey = 'Obs_Rolling_Whiteboard_Easel';
+    } else if (lower.startsWith('obs_mobile_av_cart')) {
+      groupKey = 'Obs_Mobile_AV_Cart';
+    } else if (lower.startsWith('obs_lecture_capture_tripod')) {
+      groupKey = 'Obs_Lecture_Capture_Tripod';
+    } else if (
+      lower.startsWith('obs_aisle_backpacks') ||
+      lower.startsWith('obs_dualbin')
+    ) {
+      groupKey = 'Obs_Aisle_Backpacks_And_Bin';
+    } else if (lower.startsWith('lectern_')) {
+      continue;
+    }
+
+    const pMinX = prop.positionWorld[0] - prop.sizeWorld[0] * 0.5;
+    const pMaxX = prop.positionWorld[0] + prop.sizeWorld[0] * 0.5;
+    const pMinY = Math.max(0, prop.positionWorld[1] - prop.sizeWorld[1] * 0.5);
+    const pMaxY = prop.positionWorld[1] + prop.sizeWorld[1] * 0.5;
+    const pMinZ = prop.positionWorld[2] - prop.sizeWorld[2] * 0.5;
+    const pMaxZ = prop.positionWorld[2] + prop.sizeWorld[2] * 0.5;
+
+    const existing = propGroups.get(groupKey);
+    if (!existing) {
+      propGroups.set(groupKey, {
+        id: groupKey,
+        minX: pMinX,
+        maxX: pMaxX,
+        minY: pMinY,
+        maxY: pMaxY,
+        minZ: pMinZ,
+        maxZ: pMaxZ,
+        yawDeg: prop.yawDeg,
+      });
+    } else {
+      existing.minX = Math.min(existing.minX, pMinX);
+      existing.maxX = Math.max(existing.maxX, pMaxX);
+      existing.minY = Math.min(existing.minY, pMinY);
+      existing.maxY = Math.max(existing.maxY, pMaxY);
+      existing.minZ = Math.min(existing.minZ, pMinZ);
+      existing.maxZ = Math.max(existing.maxZ, pMaxZ);
+    }
+  }
+
+  for (const composite of propGroups.values()) {
+    const cx = Number(((composite.minX + composite.maxX) * 0.5).toFixed(4));
+    const cz = Number(((composite.minZ + composite.maxZ) * 0.5).toFixed(4));
+    const sx = Number(
+      Math.max(0.2, composite.maxX - composite.minX).toFixed(4),
+    );
+    const sy = Number(
+      Math.max(0.3, composite.maxY - composite.minY).toFixed(4),
+    );
+    const sz = Number(
+      Math.max(0.16, composite.maxZ - composite.minZ).toFixed(4),
+    );
+    const blocksVis = composite.maxY >= 1.0;
+
     objects.push({
-      id: prop.name,
-      label: `Movable Prop (${prop.name})`,
+      id: composite.id,
+      label: `Movable Prop (${composite.id})`,
       category: 'movable_prop',
       editable: true,
-      transform: {
-        position: [prop.positionWorld[0], 0.0, prop.positionWorld[2]],
-        yawDeg: prop.yawDeg,
-      },
-      baselineTransform: {
-        position: [prop.positionWorld[0], 0.0, prop.positionWorld[2]],
-        yawDeg: prop.yawDeg,
-      },
+      transform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
+      baselineTransform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
       allowedBounds: {
-        minX: roomBounds.min[0] + 0.5,
-        maxX: roomBounds.max[0] - 0.5,
-        minZ: roomBounds.min[2] + 1.0,
-        maxZ: roomBounds.max[2] - 0.5,
+        minX: Number((roomBounds.min[0] + 0.3).toFixed(2)),
+        maxX: Number((roomBounds.max[0] - 0.3).toFixed(2)),
+        minZ: Number((roomBounds.min[2] + 0.4).toFixed(2)),
+        maxZ: Number((roomBounds.max[2] - 0.3).toFixed(2)),
       },
       proxies: [
         {
-          id: `proxy_${prop.name}_box`,
+          id: `proxy_${composite.id}_box`,
           kind: 'box',
-          localPosition: [0.0, prop.sizeWorld[1] / 2, 0.0],
+          localPosition: [0.0, Number((sy * 0.5).toFixed(4)), 0.0],
           localYawDeg: 0,
-          size: prop.sizeWorld,
+          size: [sx, sy, sz],
           blocksVisibility: blocksVis,
-          blocksMovement: true,
+          blocksMovement: !standaloneRandomFour,
         },
       ],
     });
   }
 
   const entrancePoint: Vec2 =
-    exitNodes.length > 0
+    exitNodes.length > 0 && !standaloneRandomFour
       ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
-      : [-4.65, 6.2];
+      : [Number((roomBounds.min[0] + 0.8).toFixed(2)), 5.8];
 
-  const rearCorridorZ = 5.35;
+  const rearCorridorZ = standaloneRandomFour ? 5.45 : 5.35;
   const routes: RouteCorridor[] = [
     {
       id: 'route_rear_main',
       label:
         exitNodes.length > 0
-          ? `Detected Exit/Entrance Route (${exitNodes.map((e) => e.name).join(', ')})`
+          ? `Detected Exit/Entrance Route (${exitNodes.slice(0, 3).map((e) => e.name).join(', ')})`
           : 'Auto-Detected Main Venue Access Corridor',
       waypoints: [
         entrancePoint,
         [entrancePoint[0], rearCorridorZ],
-        [3.4, rearCorridorZ],
+        [Number((roomBounds.max[0] - 0.8).toFixed(2)), rearCorridorZ],
       ],
       widthM: 1.15,
     },
   ];
 
-  const sortedSeats = [...seatNodes].sort((a, b) => {
-    if (Math.abs(a.positionWorld[2] - b.positionWorld[2]) > 0.35) {
-      return a.positionWorld[2] - b.positionWorld[2];
+  // Bucket rows by explicit row number (`Chair_R1`, `r2_c3`) if present; otherwise Z-cluster
+  const explicitRowMap = new Map<number, AutoLabeledGlbNode[]>();
+  const unnumberedSeats: AutoLabeledGlbNode[] = [];
+  for (const seat of seatNodes) {
+    const match = seat.name.match(/(?:chair_r|row_?|r)(\d+)/i);
+    if (match) {
+      const rNum = Number(match[1]);
+      const list = explicitRowMap.get(rNum) ?? [];
+      list.push(seat);
+      explicitRowMap.set(rNum, list);
+    } else {
+      unnumberedSeats.push(seat);
     }
-    return a.positionWorld[0] - b.positionWorld[0];
-  });
+  }
 
   const rowBuckets: AutoLabeledGlbNode[][] = [];
-  for (const seat of sortedSeats) {
-    const existingRow = rowBuckets.find(
-      (r) =>
-        r.length > 0 &&
-        Math.abs(r[0]!.positionWorld[2] - seat.positionWorld[2]) <= 0.35,
-    );
-    if (existingRow) {
-      existingRow.push(seat);
-    } else {
-      rowBuckets.push([seat]);
+  if (explicitRowMap.size > 0) {
+    const sortedRowNums = [...explicitRowMap.keys()].sort((a, b) => a - b);
+    for (const rNum of sortedRowNums) {
+      const list = explicitRowMap
+        .get(rNum)!
+        .sort((a, b) => a.positionWorld[0] - b.positionWorld[0]);
+      rowBuckets.push(list);
+    }
+  }
+  if (unnumberedSeats.length > 0) {
+    const sortedSeats = [...unnumberedSeats].sort((a, b) => {
+      if (Math.abs(a.positionWorld[2] - b.positionWorld[2]) > 0.35) {
+        return a.positionWorld[2] - b.positionWorld[2];
+      }
+      return a.positionWorld[0] - b.positionWorld[0];
+    });
+    for (const seat of sortedSeats) {
+      const existingRow = rowBuckets.find(
+        (r) =>
+          r.length > 0 &&
+          Math.abs(r[0]!.positionWorld[2] - seat.positionWorld[2]) <= 0.35,
+      );
+      if (existingRow) {
+        existingRow.push(seat);
+      } else {
+        rowBuckets.push([seat]);
+      }
     }
   }
 
   const chairGroups: ChairGroup[] = [];
+  const dynamicAllowedBounds = {
+    minX: Number((roomBounds.min[0] + 0.25).toFixed(2)),
+    maxX: Number((roomBounds.max[0] - 0.25).toFixed(2)),
+    minZ: Number((roomBounds.min[2] + 0.25).toFixed(2)),
+    maxZ: Number((roomBounds.max[2] - 0.25).toFixed(2)),
+  };
 
   rowBuckets.forEach((rowSeats, rIdx) => {
     const rowNum = rIdx + 1;
     const rowZ = rowSeats[0]!.positionWorld[2];
-    const aisleZ = Number((rowZ + 0.85).toFixed(2));
+    const maxRowZ = Math.max(...rowSeats.map((s) => s.positionWorld[2]));
+    const aisleZ = Number((maxRowZ + 0.85).toFixed(2));
     const isLastRow = rIdx === rowBuckets.length - 1 && rowZ > 2.0;
     const routeId = isLastRow ? 'route_rear_main' : `route_row${rowNum}_aisle`;
 
@@ -1260,7 +1584,26 @@ export function parseAndLabelGlbVenue(
         : `place_chair_r${rowNum}_c${colNum}`;
       const seatX = seat.positionWorld[0];
       const seatZ = seat.positionWorld[2];
+      const tierY = Math.max(0, Number(seat.positionWorld[1].toFixed(3)));
       const anchorZ = isLastRow ? rearCorridorZ : aisleZ;
+
+      let minNeighborDist = 1.0;
+      for (const other of seatNodes) {
+        if (other.nodeIndex === seat.nodeIndex) continue;
+        const d = Math.hypot(
+          seatX - other.positionWorld[0],
+          seatZ - other.positionWorld[2],
+        );
+        if (d > 0.05 && d < minNeighborDist) {
+          minNeighborDist = d;
+        }
+      }
+      const adaptiveWidthM = Number(
+        Math.min(0.6, Math.max(0.42, minNeighborDist * 0.88)).toFixed(3),
+      );
+      const adaptiveDepthM = Number(
+        Math.min(0.65, Math.max(0.45, minNeighborDist * 0.9)).toFixed(3),
+      );
 
       memberIds.push(objId);
       objects.push({
@@ -1274,20 +1617,20 @@ export function parseAndLabelGlbVenue(
           position: [seatX, 0.0, seatZ],
           yawDeg: seat.yawDeg,
         },
-        allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
+        allowedBounds: dynamicAllowedBounds,
         proxies: [
           {
             id: `proxy_${objId}_back`,
             kind: 'box',
-            localPosition: [0.0, 0.42, 0.22],
+            localPosition: [0.0, Number((tierY + 0.42).toFixed(3)), 0.22],
             localYawDeg: 0,
             size: [
-              Math.max(0.48, Math.min(0.6, seat.sizeWorld[0])),
+              Math.max(0.4, Math.min(adaptiveWidthM, seat.sizeWorld[0])),
               Math.max(0.75, Math.min(0.95, seat.sizeWorld[1])),
               0.08,
             ],
             blocksVisibility: true,
-            blocksMovement: true,
+            blocksMovement: !standaloneRandomFour,
           },
         ],
       });
@@ -1297,9 +1640,9 @@ export function parseAndLabelGlbVenue(
         label: `Seat R${rowNum}-${colNum}`,
         kind: 'chair',
         objectId: objId,
-        seatHeightM: 0.45,
-        widthM: 0.6,
-        depthM: 0.65,
+        seatHeightM: Number((0.45 + tierY).toFixed(3)),
+        widthM: adaptiveWidthM,
+        depthM: adaptiveDepthM,
         isAisle:
           cIdx === 0 ||
           cIdx === rowSeats.length - 1 ||
@@ -1321,7 +1664,7 @@ export function parseAndLabelGlbVenue(
       memberObjectIds: memberIds,
       transform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
       baselineTransform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
-      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
+      allowedBounds: dynamicAllowedBounds,
     });
   });
 
@@ -1445,43 +1788,31 @@ export function parseAndLabelGlbVenue(
     sceneId,
     source: {
       sourceId: `uploaded_glb_${assetHash}`,
-      title: `Auto-Parsed 3D Venue (${fileName})`,
+      title: standaloneRandomFour
+        ? `Standalone Uploaded 3D Building (${fileName})`
+        : `Auto-Parsed 3D Venue (${fileName})`,
       license: 'CC0-1.0 / User-Provided GLB',
       assetPath: `/venue/${fileName}`,
       assetHash,
       isFallbackFixture: false,
-      preparationNotes: `Automatically parsed ${labeledNodes.length} glTF 2.0 nodes: ${seatNodes.length} seats, ${bayNodes.length} wheelchair bays, ${exitNodes.length} exits/entrances, ${propNodes.length} movable props.`,
+      preparationNotes: `Automatically parsed ${labeledNodes.length} glTF 2.0 nodes: ${seatNodes.length} seats, ${bayNodes.length} wheelchair bays, sight target "${resolvedTarget.id}", and ${propGroups.size} movable props.`,
     },
     roomBounds,
     allowedFloorRegions: [
       {
-        minX: Number((roomBounds.min[0] + 0.4).toFixed(2)),
-        maxX: Number((roomBounds.max[0] - 0.4).toFixed(2)),
-        minZ: Number((roomBounds.min[2] + 1.0).toFixed(2)),
-        maxZ: Number((roomBounds.max[2] - 0.4).toFixed(2)),
+        minX: Number((roomBounds.min[0] + 0.2).toFixed(2)),
+        maxX: Number((roomBounds.max[0] - 0.2).toFixed(2)),
+        minZ: Number((roomBounds.min[2] + 0.2).toFixed(2)),
+        maxZ: Number((roomBounds.max[2] - 0.2).toFixed(2)),
       },
     ],
-    reservedCirculationRegions: [
-      { minX: -5.3, maxX: -4.0, minZ: -2.5, maxZ: 6.5 },
-      { minX: -5.3, maxX: 4.5, minZ: 4.8, maxZ: 6.4 },
-    ],
-    target: screenNode
-      ? {
-          id: screenNode.name,
-          label: `Presentation Target (${screenNode.name})`,
-          center: screenNode.positionWorld,
-          yawDeg: 180,
-          widthM: Math.max(1.6, screenNode.sizeWorld[0]),
-          heightM: Math.max(1.0, screenNode.sizeWorld[1]),
-        }
-      : {
-          id: 'target_auto_screen',
-          label: 'Auto-Detected Stage Screen',
-          center: [0.0, 2.4, Number((roomBounds.min[2] + 1.7).toFixed(2))],
-          yawDeg: 180,
-          widthM: 2.8,
-          heightM: 1.4,
-        },
+    reservedCirculationRegions: standaloneRandomFour
+      ? []
+      : [
+          { minX: -5.3, maxX: -4.0, minZ: -2.5, maxZ: 6.5 },
+          { minX: -5.3, maxX: 4.5, minZ: 4.8, maxZ: 6.4 },
+        ],
+    target: resolvedTarget,
     objects,
     chairGroups,
     places,
@@ -1491,6 +1822,7 @@ export function parseAndLabelGlbVenue(
   });
 
   uploadedGlbBufferBySceneId.set(snapshot.sceneId, glbBytes);
+  glbAlignmentBySceneId.set(snapshot.sceneId, IDENTITY_GLB_ALIGNMENT);
   if (standaloneRandomFour) {
     standaloneGlbSceneIds.add(snapshot.sceneId);
   }
@@ -1505,9 +1837,9 @@ export function parseAndLabelGlbVenue(
       seats: seatNodes.length,
       wheelchairBays: bayNodes.length,
       exitsAndEntrances: exitNodes.length,
-      stagesAndScreens: (stageNode ? 1 : 0) + (screenNode ? 1 : 0),
+      stagesAndScreens: (stageNode ? 1 : 0) + 1,
       pillarsAndStructures: pillarNodes.length,
-      movableProps: propNodes.length,
+      movableProps: propGroups.size,
       shellAndFloor: shellNodes.length,
     },
     labeledNodes,
@@ -1723,7 +2055,10 @@ function yieldToUiThread(ms = 18): Promise<void> {
   });
 }
 
-function parseGlbGroupAsync(glbBytes: Uint8Array): Promise<THREE.Group | null> {
+function parseGlbGroupAsync(
+  glbBytes: Uint8Array,
+  alignment: GlbSceneAlignment = IDENTITY_GLB_ALIGNMENT,
+): Promise<THREE.Group | null> {
   return new Promise((resolve) => {
     try {
       const loader = new GLTFLoader();
@@ -1737,16 +2072,16 @@ function parseGlbGroupAsync(glbBytes: Uint8Array): Promise<THREE.Group | null> {
         (gltf) => {
           const archGroup = gltf.scene;
           archGroup.name = 'uploaded_glb_architectural_shell';
-          archGroup.rotation.y = STANDALONE_GLB_ALIGNMENT.rotationYRad;
+          archGroup.rotation.y = alignment.rotationYRad;
           archGroup.scale.set(
-            STANDALONE_GLB_ALIGNMENT.scale,
-            STANDALONE_GLB_ALIGNMENT.scale,
-            STANDALONE_GLB_ALIGNMENT.scale,
+            alignment.scale,
+            alignment.scale,
+            alignment.scale,
           );
           archGroup.position.set(
-            STANDALONE_GLB_ALIGNMENT.position[0],
-            STANDALONE_GLB_ALIGNMENT.position[1],
-            STANDALONE_GLB_ALIGNMENT.position[2],
+            alignment.position[0],
+            alignment.position[1],
+            alignment.position[2],
           );
           resolve(archGroup);
         },
@@ -1912,7 +2247,10 @@ export async function parseAndLabelGlbVenueAsync(
     label: 'Step 4/6 · Building Standalone 3D Scene & Routes',
     detail: `Labeled ${report.counts.seats} seats & ${report.counts.wheelchairBays} bays; building standalone 3D mesh group…`,
   });
-  const parsedGroup = await parseGlbGroupAsync(glbBytes);
+  const parsedGroup = await parseGlbGroupAsync(
+    glbBytes,
+    getGlbAlignmentForScene(report.snapshot.sceneId),
+  );
   if (parsedGroup) {
     uploadedGlbGroupBySceneId.set(report.snapshot.sceneId, parsedGroup);
   }

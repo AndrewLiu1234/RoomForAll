@@ -36,6 +36,7 @@ import {
   generateSampleCustomAuditoriumGlb,
   generateVenueGlbBinary,
   getActiveKeyframeAtTime,
+  getGlbAlignmentForScene,
   getOverviewCameraPose,
   getProxyWorldTransform,
   getUploadedGlbBytesForScene,
@@ -892,6 +893,41 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       expect(roomEval.isValidStructure).toBe(true);
       expect(roomEval.occupiedCount).toBe(4);
       expect(roomEval.capacityCount).toBe(roomReport.snapshot.places.length);
+    }
+
+    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb is present, verify:
+    // 1. Exactly 50 real chairs (Chair_R1_S01..Chair_R5_S10) are parsed with zero false-positive front spots
+    // 2. SightTargetAgent selects ProjScreen_16x9_Active_Surface at [0.15, 2.94, -4.38] (3.72m x 2.04m)
+    // 3. Identity alignment is used so the 3D classroom mesh and parsed seats/screen match 1:1
+    const externalClassroomGlbPath =
+      '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb';
+    if (fs.existsSync(externalClassroomGlbPath)) {
+      const clsBuf = new Uint8Array(fs.readFileSync(externalClassroomGlbPath));
+      const clsReport = await parseAndLabelGlbVenueAsync(clsBuf, {
+        fileName: 'smallClassroom.glb',
+        yieldDelayMs: 1,
+        standaloneRandomFour: true,
+        randomFn: () => 0.35,
+      });
+      expect(clsReport.counts.seats).toBe(50);
+      expect(clsReport.counts.wheelchairBays).toBe(0);
+      expect(clsReport.snapshot.places).toHaveLength(50);
+      expect(clsReport.snapshot.target.id).toBe(
+        'ProjScreen_16x9_Active_Surface',
+      );
+      expect(clsReport.snapshot.target.center[0]).toBeCloseTo(0.15, 2);
+      expect(clsReport.snapshot.target.center[1]).toBeCloseTo(2.94, 2);
+      expect(clsReport.snapshot.target.center[2]).toBeCloseTo(-4.38, 2);
+      expect(clsReport.snapshot.target.widthM).toBeCloseTo(3.72, 2);
+      expect(clsReport.snapshot.target.heightM).toBeCloseTo(2.04, 2);
+
+      const align = getGlbAlignmentForScene(clsReport.snapshot.sceneId);
+      expect(align.rotationYRad).toBe(0);
+      expect(align.scale).toBe(1.0);
+
+      const clsEval = evaluateScene(clsReport.snapshot);
+      expect(clsEval.isValidStructure).toBe(true);
+      expect(clsEval.occupiedCount).toBe(4);
     }
 
     // Also verify spawnRandomFourAttendees on arbitrary place lists

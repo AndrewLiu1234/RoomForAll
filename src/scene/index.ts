@@ -32,8 +32,10 @@ export {
 } from './preparedVenue.js';
 
 export {
+  IDENTITY_GLB_ALIGNMENT,
   STANDALONE_GLB_ALIGNMENT,
   generateSampleCustomAuditoriumGlb,
+  getGlbAlignmentForScene,
   getUploadedGlbBytesForScene,
   getUploadedGlbGroupForScene,
   isStandaloneUploadedGlbScene,
@@ -45,6 +47,7 @@ export {
   type GlbParallelAgentTelemetry,
   type GlbParseProgressUpdate,
   type GlbParseStage,
+  type GlbSceneAlignment,
   type GlbSubAgentSummary,
   type GlbVenueParseReport,
 } from './glbAutoLabeler.js';
