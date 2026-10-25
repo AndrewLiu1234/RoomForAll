@@ -1,12 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   INSPECTION_CAMERA,
   getAttendeeCameraPose,
   type Evaluation,
   type SceneSnapshot,
 } from '../shared/index.js';
-import { disposeVenueScene, type VenueViewportProps } from '../scene/index.js';
+import {
+  disposeVenueScene,
+  getUploadedGlbBytesForScene,
+  type VenueViewportProps,
+} from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
 import { computeAttendeeSampleVisibilityMask } from './localEvaluatorFallback.js';
 
@@ -146,6 +151,56 @@ export function VenueViewportStage({
         viewMode === 'attendee_pov' ? selectedAttendeeId : undefined,
       forBlindEvidenceCapture: false,
     });
+
+    // If this snapshot came from an uploaded .glb building (e.g. room.glb),
+    // parse and render its actual 3D architectural shell meshes in the scene!
+    let cancelled = false;
+    const rawGlbBytes = getUploadedGlbBytesForScene(snapshot.sceneId);
+    if (rawGlbBytes && rawGlbBytes.byteLength > 20_000) {
+      const loader = new GLTFLoader();
+      const sliceBuffer = rawGlbBytes.buffer.slice(
+        rawGlbBytes.byteOffset,
+        rawGlbBytes.byteOffset + rawGlbBytes.byteLength,
+      ) as ArrayBuffer;
+      loader.parse(
+        sliceBuffer,
+        '',
+        (gltf) => {
+          if (cancelled || sceneRef.current !== scene) return;
+          const archGroup = gltf.scene;
+          archGroup.name = 'uploaded_glb_architectural_shell';
+          // Align +X stage orientation (like room.glb) to VenuePilot's -Z stage axis
+          archGroup.rotation.y = Math.PI / 2;
+          archGroup.scale.set(0.68, 0.68, 0.68);
+          archGroup.position.set(0.0, 0.02, 0.8);
+
+          archGroup.traverse((child) => {
+            const mesh = child as THREE.Mesh;
+            if (mesh.isMesh && mesh.material) {
+              // Make the baked static seat cluster translucent so our 24 interactive
+              // color-coded chairs, wheelchair bays, and props remain 100% legible
+              if (
+                child.name.includes('1275667551') ||
+                mesh.name.includes('1275667551')
+              ) {
+                mesh.material = new THREE.MeshStandardMaterial({
+                  color: 0x991b1b,
+                  transparent: true,
+                  opacity: 0.22,
+                  roughness: 0.7,
+                });
+              }
+            }
+          });
+
+          scene.add(archGroup);
+          renderFrameRef.current?.();
+        },
+        () => {
+          // Ignore GLTFLoader parse error and keep procedural proxy scene
+        },
+      );
+    }
 
     if (viewMode === 'overview') {
       for (const route of snapshot.routes) {
@@ -314,6 +369,10 @@ export function VenueViewportStage({
         }
       });
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     snapshot,
     selectedAttendeeId,

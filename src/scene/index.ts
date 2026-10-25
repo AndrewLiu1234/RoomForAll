@@ -33,6 +33,7 @@ export {
 
 export {
   generateSampleCustomAuditoriumGlb,
+  getUploadedGlbBytesForScene,
   parseAndLabelGlbVenue,
   parseAndLabelGlbVenueAsync,
   type AutoLabeledGlbNode,

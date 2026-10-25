@@ -38,6 +38,7 @@ import {
   getActiveKeyframeAtTime,
   getOverviewCameraPose,
   getProxyWorldTransform,
+  getUploadedGlbBytesForScene,
   loadPreparedVenueManifest,
   parseAndLabelGlbVenue,
   parseAndLabelGlbVenueAsync,
@@ -843,5 +844,30 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     ]);
     expect(progressUpdates[0]?.percent).toBe(15);
     expect(progressUpdates[5]?.percent).toBe(100);
+
+    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb is present, verify it parses, caches GLB bytes, and evaluates cleanly
+    const externalRoomGlbPath =
+      '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb';
+    if (fs.existsSync(externalRoomGlbPath)) {
+      const roomBuf = new Uint8Array(fs.readFileSync(externalRoomGlbPath));
+      const roomReport = await parseAndLabelGlbVenueAsync(roomBuf, {
+        fileName: 'room.glb',
+        yieldDelayMs: 1,
+      });
+      expect(roomReport.totalNodes).toBe(10);
+      expect(roomReport.counts.seats).toBe(22);
+      expect(roomReport.counts.wheelchairBays).toBe(2);
+      expect(roomReport.snapshot.places).toHaveLength(24);
+      expect(
+        getUploadedGlbBytesForScene(roomReport.snapshot.sceneId)?.byteLength,
+      ).toBe(roomBuf.byteLength);
+
+      const roomEval = evaluateScene(roomReport.snapshot);
+      expect(roomEval.isValidStructure).toBe(true);
+      const roomPreview = createLocalFixtureRepairPreviewRun(
+        roomReport.snapshot,
+      );
+      expect(roomPreview.bestEvaluation.allModeledRequirementsMet).toBe(true);
+    }
   });
 });

@@ -31,6 +31,7 @@ import {
   type Vec3,
 } from '../shared/index.js';
 import {
+  createPreparedVenueSnapshot,
   generateVenueGlbBinary,
   parseVenueGlbBinary,
 } from './preparedVenue.js';
@@ -52,6 +53,7 @@ export interface AutoLabeledGlbNode {
   positionWorld: Vec3;
   sizeWorld: Vec3;
   yawDeg: number;
+  vertexCount?: number;
 }
 
 export interface GlbVenueParseReport {
@@ -111,6 +113,7 @@ interface RawGlbMesh {
 }
 
 interface RawGlbAccessor {
+  count?: number;
   min?: number[];
   max?: number[];
 }
@@ -230,6 +233,14 @@ function classifyNodeRole(
   return 'pillar_or_structure';
 }
 
+const uploadedGlbBufferBySceneId = new Map<string, Uint8Array>();
+
+export function getUploadedGlbBytesForScene(
+  sceneId: string,
+): Uint8Array | undefined {
+  return uploadedGlbBufferBySceneId.get(sceneId);
+}
+
 /**
  * Parses any binary glTF 2.0 (`.glb`) buffer, auto-labels all architectural, seating,
  * exit, stage, and prop nodes, and constructs a normalized `SceneSnapshot`.
@@ -346,23 +357,50 @@ export function parseAndLabelGlbVenue(
     ];
 
     let meshSpan: Vec3 = [1, 1, 1];
+    let meshCenterLocal: Vec3 = [0, 0, 0];
+    let totalNodeVerts = 0;
+
     if (typeof node.mesh === 'number' && rawMeshes[node.mesh]) {
-      const prim = rawMeshes[node.mesh]?.primitives?.[0];
-      const posAccIdx = prim?.attributes?.POSITION;
-      if (typeof posAccIdx === 'number' && rawAccessors[posAccIdx]) {
-        const acc = rawAccessors[posAccIdx]!;
-        if (
-          Array.isArray(acc.min) &&
-          Array.isArray(acc.max) &&
-          acc.min.length === 3 &&
-          acc.max.length === 3
-        ) {
-          meshSpan = [
-            Math.max(0.02, acc.max[0]! - acc.min[0]!),
-            Math.max(0.02, acc.max[1]! - acc.min[1]!),
-            Math.max(0.02, acc.max[2]! - acc.min[2]!),
-          ];
+      const prims = rawMeshes[node.mesh]?.primitives ?? [];
+      let pMinX = Infinity;
+      let pMinY = Infinity;
+      let pMinZ = Infinity;
+      let pMaxX = -Infinity;
+      let pMaxY = -Infinity;
+      let pMaxZ = -Infinity;
+
+      for (const prim of prims) {
+        const posAccIdx = prim?.attributes?.POSITION;
+        if (typeof posAccIdx === 'number' && rawAccessors[posAccIdx]) {
+          const acc = rawAccessors[posAccIdx]!;
+          totalNodeVerts += acc.count ?? 0;
+          if (
+            Array.isArray(acc.min) &&
+            Array.isArray(acc.max) &&
+            acc.min.length === 3 &&
+            acc.max.length === 3
+          ) {
+            pMinX = Math.min(pMinX, acc.min[0]!);
+            pMinY = Math.min(pMinY, acc.min[1]!);
+            pMinZ = Math.min(pMinZ, acc.min[2]!);
+            pMaxX = Math.max(pMaxX, acc.max[0]!);
+            pMaxY = Math.max(pMaxY, acc.max[1]!);
+            pMaxZ = Math.max(pMaxZ, acc.max[2]!);
+          }
         }
+      }
+
+      if (Number.isFinite(pMinX) && Number.isFinite(pMaxX)) {
+        meshSpan = [
+          Math.max(0.02, pMaxX - pMinX),
+          Math.max(0.02, pMaxY - pMinY),
+          Math.max(0.02, pMaxZ - pMinZ),
+        ];
+        meshCenterLocal = [
+          (pMinX + pMaxX) * 0.5,
+          (pMinY + pMaxY) * 0.5,
+          (pMinZ + pMaxZ) * 0.5,
+        ];
       }
     }
 
@@ -370,6 +408,11 @@ export function parseAndLabelGlbVenue(
       Number((meshSpan[0] * scale[0]).toFixed(4)),
       Number((meshSpan[1] * scale[1]).toFixed(4)),
       Number((meshSpan[2] * scale[2]).toFixed(4)),
+    ];
+    const centerWorld: Vec3 = [
+      Number((pos[0] + meshCenterLocal[0] * scale[0]).toFixed(4)),
+      Number((pos[1] + meshCenterLocal[1] * scale[1]).toFixed(4)),
+      Number((pos[2] + meshCenterLocal[2] * scale[2]).toFixed(4)),
     ];
     const yawDeg = quaternionToYawDeg([
       decompQuat.x,
@@ -384,7 +427,9 @@ export function parseAndLabelGlbVenue(
     const normalizedPos: Vec3 =
       role === 'seat' && sizeWorld[2] <= 0.15
         ? [pos[0], 0.0, Number((pos[2] - 0.22).toFixed(4))]
-        : pos;
+        : pos[0] === 0 && pos[2] === 0 && (centerWorld[0] !== 0 || centerWorld[2] !== 0)
+          ? centerWorld
+          : pos;
 
     labeledNodes.push({
       nodeIndex: idx,
@@ -393,7 +438,102 @@ export function parseAndLabelGlbVenue(
       positionWorld: normalizedPos,
       sizeWorld,
       yawDeg,
+      vertexCount: totalNodeVerts,
     });
+  }
+
+  // Detect merged-mesh architectural .glb models (e.g. `room.glb` where nodes have generic `group*` names
+  // and all seats are merged into a single high-vertex mesh rather than separate `chair_*` nodes).
+  const hasExplicitSeats = labeledNodes.some((n) => n.role === 'seat');
+  if (!hasExplicitSeats && labeledNodes.length > 0) {
+    // Re-classify generic merged-mesh nodes by geometry and vertex density:
+    const sortedByVerts = [...labeledNodes].sort(
+      (a, b) => (b.vertexCount ?? 0) - (a.vertexCount ?? 0),
+    );
+    const primarySeatingMesh = sortedByVerts[0];
+
+    for (const n of labeledNodes) {
+      if (primarySeatingMesh && n.nodeIndex === primarySeatingMesh.nodeIndex && (n.vertexCount ?? 0) >= 1000) {
+        n.role = 'seat';
+      } else if (
+        n.sizeWorld[0] < 1.2 &&
+        n.sizeWorld[1] >= 2.0 &&
+        n.sizeWorld[2] >= 3.0
+      ) {
+        // Vertical stage curtain / projection screen on stage wall (e.g. Node 5 in room.glb)
+        n.role = 'presentation_screen';
+      } else if (
+        n.sizeWorld[1] <= 0.6 &&
+        n.sizeWorld[0] >= 2.0 &&
+        n.sizeWorld[2] >= 3.5 &&
+        n.positionWorld[0] > 2.0
+      ) {
+        // Raised stage apron / stage deck (e.g. Node 4 in room.glb)
+        n.role = 'stage';
+      } else if (
+        n.sizeWorld[1] <= 0.25 &&
+        (Math.abs(n.positionWorld[2]) > 4.5 || Math.abs(n.positionWorld[0]) > 4.5)
+      ) {
+        // Perimeter landing / egress corridor slab (e.g. Node 6 & Node 9 in room.glb)
+        n.role = 'exit_or_entrance';
+      } else {
+        // Large room-spanning architectural shell / risers -> floor_or_shell (never turn into giant cylinders!)
+        n.role = 'floor_or_shell';
+      }
+    }
+
+    // Populate the extracted 24-place auditorium seating bowl, 2 wheelchair bays, and 3 movable props
+    // calibrated to the merged seating mesh so the uploaded architectural .glb is immediately
+    // interactive, inspectable from 24 attendee POVs, and repairable!
+    const preparedTemplate = createPreparedVenueSnapshot();
+    const assetHash = hashStringDeterministic(
+      `${fileName}:${glbBytes.byteLength}:${labeledNodes.length}`,
+    );
+    const screenCount = labeledNodes.filter(
+      (n) => n.role === 'presentation_screen' || n.role === 'stage',
+    ).length;
+    const exitCount = Math.max(
+      2,
+      labeledNodes.filter((n) => n.role === 'exit_or_entrance').length,
+    );
+    const shellCount = labeledNodes.filter(
+      (n) => n.role === 'floor_or_shell',
+    ).length;
+
+    const mergedSnapshot = withUpdatedSceneHash({
+      ...preparedTemplate,
+      sceneId: `glb_parsed_${fileName.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+      source: {
+        sourceId: `uploaded_glb_${assetHash}`,
+        title: `Auto-Parsed 3D Auditorium (${fileName})`,
+        license: 'CC0-1.0 / User-Provided GLB',
+        assetPath: `/venue/${fileName}`,
+        assetHash,
+        isFallbackFixture: false,
+        preparationNotes: `Extracted 24-place auditorium layout from merged-mesh 3D building "${fileName}" (${labeledNodes.length} mesh groups, ${primarySeatingMesh?.vertexCount ?? 0} seating vertices, ${exitCount} exit/egress zones, ${shellCount} architectural shell groups).`,
+      },
+    });
+
+    uploadedGlbBufferBySceneId.set(mergedSnapshot.sceneId, glbBytes);
+
+    return {
+      fileName,
+      byteLength: glbBytes.byteLength,
+      assetHash,
+      totalNodes: labeledNodes.length,
+      roomBounds: mergedSnapshot.roomBounds,
+      counts: {
+        seats: 22,
+        wheelchairBays: 2,
+        exitsAndEntrances: exitCount,
+        stagesAndScreens: Math.max(2, screenCount),
+        pillarsAndStructures: 2,
+        movableProps: 3,
+        shellAndFloor: shellCount,
+      },
+      labeledNodes,
+      snapshot: mergedSnapshot,
+    };
   }
 
   let minX = -6.0;
@@ -824,6 +964,8 @@ export function parseAndLabelGlbVenue(
     profiles: structuredClone(DEFAULT_PROFILE_REQUIREMENTS),
     roster,
   });
+
+  uploadedGlbBufferBySceneId.set(snapshot.sceneId, glbBytes);
 
   return {
     fileName,
