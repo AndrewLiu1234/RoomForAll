@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type {
-  AttendeeAssignment,
   Evaluation,
+  ProfileId,
   SceneSnapshot,
 } from '../shared/index.js';
 
@@ -13,6 +13,9 @@ export interface RosterPanelProps {
   onSelectAttendee: (attendeeId: string) => void;
   onChangePlaceAssignment: (attendeeId: string, newPlaceId: string) => void;
   onOpenProfileEditor: () => void;
+  onAddAttendee?: (placeId: string, profileId: ProfileId) => void;
+  onRemoveAttendee?: (attendeeId: string) => void;
+  onRandomizeFourAttendees?: () => void;
 }
 
 function formatShortPlaceLabel(placeId: string, fallbackLabel?: string): string {
@@ -85,6 +88,9 @@ export function RosterPanel({
   onSelectAttendee,
   onChangePlaceAssignment,
   onOpenProfileEditor,
+  onAddAttendee,
+  onRemoveAttendee,
+  onRandomizeFourAttendees,
 }: RosterPanelProps): React.ReactElement {
   const [filterMode, setFilterMode] = useState<'all' | 'issues' | 'clear'>('all');
 
@@ -126,6 +132,42 @@ export function RosterPanel({
     ? snapshot.profiles[selectedAttendee.profileId]
     : undefined;
 
+  const occupiedPlaceIds = useMemo(
+    () => new Set(snapshot.roster.map((m) => m.assignedPlaceId)),
+    [snapshot.roster],
+  );
+
+  const emptyPlaces = useMemo(
+    () => snapshot.places.filter((p) => !occupiedPlaceIds.has(p.id)),
+    [snapshot.places, occupiedPlaceIds],
+  );
+
+  const [newPlaceId, setNewPlaceId] = useState<string>(
+    () => emptyPlaces[0]?.id ?? '',
+  );
+  const [newProfileId, setNewProfileId] =
+    useState<ProfileId>('reference_adult');
+
+  useEffect(() => {
+    if (!emptyPlaces.some((p) => p.id === newPlaceId)) {
+      const firstEmpty = emptyPlaces[0];
+      setNewPlaceId(firstEmpty?.id ?? '');
+      if (firstEmpty) {
+        setNewProfileId(
+          firstEmpty.kind === 'wheelchair_bay'
+            ? 'wheelchair_user'
+            : 'reference_adult',
+        );
+      }
+    }
+  }, [emptyPlaces, newPlaceId]);
+
+  const targetEmptyPlace = emptyPlaces.find((p) => p.id === newPlaceId);
+  const compatibleProfilesForNewSeat: ProfileId[] =
+    targetEmptyPlace?.kind === 'wheelchair_bay'
+      ? ['wheelchair_user']
+      : ['reference_adult', 'shorter_seated', 'extra_legroom'];
+
   return (
     <aside className="vp-rail-left" aria-label="Guest Roster">
       {/* Top Section: Roster Header & Filter Bar */}
@@ -153,36 +195,110 @@ export function RosterPanel({
             </span>
           </div>
 
-          <button
-            type="button"
-            className="vp-btn"
-            style={{ padding: '4px 9px', fontSize: '0.73rem' }}
-            onClick={onOpenProfileEditor}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {!isFrozen && onRandomizeFourAttendees && (
+              <button
+                type="button"
+                className="vp-btn"
+                style={{ padding: '4px 8px', fontSize: '0.71rem' }}
+                onClick={onRandomizeFourAttendees}
+                title="Spawn 4 people at random into the parsed 3D seats"
+              >
+                Randomize 4
+              </button>
+            )}
+            <button
+              type="button"
+              className="vp-btn"
+              style={{ padding: '4px 9px', fontSize: '0.73rem' }}
+              onClick={onOpenProfileEditor}
             >
-              <line x1="4" x2="4" y1="21" y2="14" />
-              <line x1="4" x2="4" y1="10" y2="3" />
-              <line x1="12" x2="12" y1="21" y2="12" />
-              <line x1="12" x2="12" y1="8" y2="3" />
-              <line x1="20" x2="20" y1="21" y2="16" />
-              <line x1="20" x2="20" y1="12" y2="3" />
-              <line x1="2" x2="6" y1="14" y2="14" />
-              <line x1="10" x2="14" y1="8" y2="8" />
-              <line x1="18" x2="22" y1="16" y2="16" />
-            </svg>
-            <span>Profiles</span>
-          </button>
+              <span>Profiles</span>
+            </button>
+          </div>
         </div>
+
+        {/* Add Person to Any Empty Seat Controls */}
+        {!isFrozen && onAddAttendee && emptyPlaces.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              padding: '8px',
+              borderRadius: 'var(--radius-inner)',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '6px',
+              }}
+            >
+              <select
+                aria-label="Select empty seat"
+                value={newPlaceId}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  setNewPlaceId(pid);
+                  const picked = emptyPlaces.find((p) => p.id === pid);
+                  if (picked) {
+                    setNewProfileId(
+                      picked.kind === 'wheelchair_bay'
+                        ? 'wheelchair_user'
+                        : 'reference_adult',
+                    );
+                  }
+                }}
+                className="vp-select vp-focusable"
+                style={{ fontSize: '0.72rem' }}
+              >
+                {emptyPlaces.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Select profile for new person"
+                value={
+                  compatibleProfilesForNewSeat.includes(newProfileId)
+                    ? newProfileId
+                    : compatibleProfilesForNewSeat[0]!
+                }
+                onChange={(e) => setNewProfileId(e.target.value as ProfileId)}
+                className="vp-select vp-focusable"
+                style={{ fontSize: '0.72rem' }}
+              >
+                {compatibleProfilesForNewSeat.map((profId) => (
+                  <option key={profId} value={profId}>
+                    {snapshot.profiles[profId]?.label ?? profId}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className="vp-btn vp-btn-primary"
+              style={{ width: '100%', padding: '4px 8px', fontSize: '0.73rem' }}
+              onClick={() => {
+                if (!newPlaceId) return;
+                const chosenProfile = compatibleProfilesForNewSeat.includes(
+                  newProfileId,
+                )
+                  ? newProfileId
+                  : compatibleProfilesForNewSeat[0]!;
+                onAddAttendee(newPlaceId, chosenProfile);
+              }}
+            >
+              + Add Person to Seat ({emptyPlaces.length} empty)
+            </button>
+          </div>
+        )}
 
         {/* Filter Segmented Control */}
         <div
@@ -238,59 +354,41 @@ export function RosterPanel({
         {filteredRoster.length === 0 ? (
           <div
             style={{
-              padding: '28px 16px',
+              padding: '20px 12px',
               textAlign: 'center',
-              color: 'var(--text-secondary)',
-              fontSize: '0.78rem',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '10px',
+              fontSize: '0.76rem',
+              color: 'var(--text-muted)',
             }}
           >
-            <div>
-              {filterMode === 'issues'
-                ? 'All seats pass sightline, route, and clearance checks.'
-                : 'No guests match the current filter.'}
-            </div>
-            {filterMode !== 'all' && (
-              <button
-                type="button"
-                className="vp-btn"
-                style={{ padding: '4px 10px', fontSize: '0.74rem' }}
-                onClick={() => setFilterMode('all')}
-              >
-                Show All {snapshot.roster.length} Guests
-              </button>
-            )}
+            No guests match this filter.
           </div>
         ) : (
-          filteredRoster.map((member: AttendeeAssignment) => {
+          filteredRoster.map((member) => {
             const isSelected = member.attendeeId === selectedAttendeeId;
             const attEval = evaluation.attendees[member.attendeeId];
             const profile = snapshot.profiles[member.profileId];
             const place = snapshot.places.find(
               (p) => p.id === member.assignedPlaceId,
             );
-            const cleanName = parseCleanGuestName(member.label);
+            const isPass = attEval ? attEval.clearAndUsable : true;
+            const visPct = attEval
+              ? Math.round(attEval.sampledVisibility * 100)
+              : 100;
             const seatCode = formatShortPlaceLabel(
               member.assignedPlaceId,
               place?.label,
             );
-            const visPct = attEval
-              ? Math.round(attEval.sampledVisibility * 100)
-              : 100;
-            const isPass = attEval?.clearAndUsable ?? true;
+            const cleanName = parseCleanGuestName(member.label);
 
             return (
-              <button
+              <div
                 key={member.attendeeId}
-                type="button"
                 role="listitem"
                 onClick={() => onSelectAttendee(member.attendeeId)}
                 className={`vp-roster-row vp-focusable ${
                   isSelected ? 'vp-roster-row-active' : ''
                 }`}
+                style={{ cursor: 'pointer' }}
               >
                 <div
                   style={{
@@ -366,8 +464,26 @@ export function RosterPanel({
                   >
                     {visPct}%
                   </span>
+                  {!isFrozen && onRemoveAttendee && (
+                    <button
+                      type="button"
+                      className="vp-btn"
+                      style={{
+                        padding: '1px 5px',
+                        fontSize: '0.67rem',
+                        color: 'var(--status-fail-text)',
+                      }}
+                      title={`Remove ${cleanName} from seat`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveAttendee(member.attendeeId);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
-              </button>
+              </div>
             );
           })
         )}

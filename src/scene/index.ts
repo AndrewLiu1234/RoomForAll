@@ -34,6 +34,27 @@ export {
 } from './preparedVenue.js';
 
 export {
+  IDENTITY_GLB_ALIGNMENT,
+  STANDALONE_GLB_ALIGNMENT,
+  generateSampleCustomAuditoriumGlb,
+  getGlbAlignmentForScene,
+  getUploadedGlbBytesForScene,
+  getUploadedGlbGroupForScene,
+  isStandaloneUploadedGlbScene,
+  parseAndLabelGlbVenue,
+  parseAndLabelGlbVenueAsync,
+  spawnRandomFourAttendees,
+  type AutoLabeledGlbNode,
+  type AutoLabeledNodeRole,
+  type GlbParallelAgentTelemetry,
+  type GlbParseProgressUpdate,
+  type GlbParseStage,
+  type GlbSceneAlignment,
+  type GlbSubAgentSummary,
+  type GlbVenueParseReport,
+} from './glbAutoLabeler.js';
+
+export {
   applyAttendeeCameraPose,
   applyKeyframeToCamera,
   applyOverviewCameraPose,

@@ -49,10 +49,15 @@ import {
   createGeminiArgonAdapter,
   type ArgonProviderAdapter,
 } from './argonClient.js';
+import {
+  runParallelGeminiGlbAgents,
+  type GlbSceneDescriptorInput,
+} from './glbAgentParser.js';
 import { createRunStorage, type RunStorage } from './storage.js';
 import { buildCaptureTourSpec, extractTourAttendeeOrder } from './tour.js';
 
 export * from './argonClient.js';
+export * from './glbAgentParser.js';
 export * from './storage.js';
 export * from './tour.js';
 
@@ -230,6 +235,30 @@ export function createApp(options: CreateAppOptions = {}): Express {
     );
     await storage.saveRunRecord(record);
   }
+
+  app.post('/api/parse-glb', async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Partial<GlbSceneDescriptorInput>;
+      if (!Array.isArray(body.nodes)) {
+        res.status(400).json({ error: 'Missing nodes array in descriptor.' });
+        return;
+      }
+      const result = await runParallelGeminiGlbAgents({
+        fileName:
+          typeof body.fileName === 'string'
+            ? body.fileName
+            : 'uploaded-venue.glb',
+        byteLength:
+          typeof body.byteLength === 'number' ? body.byteLength : 0,
+        nodes: body.nodes,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({
+        error: `Parallel Gemini GLB agent parser failed: ${(err as Error).message}`,
+      });
+    }
+  });
 
   app.post('/api/preview', (req, res) => {
     try {

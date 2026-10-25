@@ -26,6 +26,10 @@ import {
   type Vec3,
 } from '../shared/index.js';
 import {
+  getUploadedGlbGroupForScene,
+  isStandaloneUploadedGlbScene,
+} from './glbAutoLabeler.js';
+import {
   buildVenueExitPortalNodes,
   createArticulatedAvatarMesh,
   updateAvatarAnimationPose,
@@ -135,6 +139,13 @@ export function buildVenueThreeScene(
   const fillDirLight = new THREE.DirectionalLight(0x93c5fd, 0.45);
   fillDirLight.position.set(-4.0, snapshot.roomBounds.max[1] * 1.1, -3.5);
   scene.add(fillDirLight);
+
+  const standaloneGlbGroup = isStandaloneUploadedGlbScene(snapshot.sceneId)
+    ? getUploadedGlbGroupForScene(snapshot.sceneId)
+    : undefined;
+  if (standaloneGlbGroup) {
+    scene.add(standaloneGlbGroup.clone(true));
+  }
 
   // 2. Room Floor, Walls & Reserved Circulation Markings
   const minX = snapshot.roomBounds.min[0];

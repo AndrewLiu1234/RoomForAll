@@ -1,24 +1,36 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   INSPECTION_CAMERA,
   getAttendeeCameraPose,
   type Evaluation,
   type EvacuationMode,
+  type ProfileId,
 } from '../shared/index.js';
 import { simulateEvacuation } from '../evaluation/index.js';
 import {
+  disposeVenueScene,
+  getGlbAlignmentForScene,
+  getUploadedGlbBytesForScene,
+  getUploadedGlbGroupForScene,
   updateSceneEvacuationStep,
   type VenueViewportProps,
 } from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
 import { computeAttendeeSampleVisibilityMask } from './localEvaluatorFallback.js';
 
-export interface InteractiveViewportStageProps extends VenueViewportProps {
+export type ViewportCameraMode = 'overview' | 'attendee_pov' | 'flythrough';
+
+export interface InteractiveViewportStageProps
+  extends Omit<VenueViewportProps, 'viewMode'> {
+  viewMode: ViewportCameraMode;
   evaluation: Evaluation;
   showSightlineOverlays: boolean;
-  onToggleViewMode: (mode: 'overview' | 'attendee_pov') => void;
+  onToggleViewMode: (mode: ViewportCameraMode) => void;
   onToggleSightlineOverlays: () => void;
+  onAddAttendeeAtPlace?: (placeId: string, profileId?: ProfileId) => void;
+  onRemoveAttendee?: (attendeeId: string) => void;
 }
 
 function formatShortSeat(placeId: string, fallbackLabel?: string): string {
@@ -46,13 +58,27 @@ export function VenueViewportStage({
   showSightlineOverlays,
   onToggleViewMode,
   onToggleSightlineOverlays,
+  onAddAttendeeAtPlace,
+  onRemoveAttendee,
 }: InteractiveViewportStageProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const renderFrameRef = useRef<(() => void) | null>(null);
   const attendeeProxyNodesRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const defaultDistance = snapshot.places.length > 8 ? 10.6 : 7.2;
+
+  const [selectedEmptyPlaceId, setSelectedEmptyPlaceId] = useState<
+    string | null
+  >(null);
+  const [flyHudReadout, setFlyHudReadout] = useState<{
+    pos: [number, number, number];
+    turbo: boolean;
+  }>({
+    pos: [0, 1.75, 4.2],
+    turbo: false,
+  });
 
   const [evacMode, setEvacMode] = useState<EvacuationMode>('none');
   const [evacTimeSec, setEvacTimeSec] = useState<number>(0);
@@ -78,8 +104,21 @@ export function VenueViewportStage({
     distanceM: defaultDistance,
   }));
 
-  const orbitAnglesRef = useRef(orbitAngles);
-  orbitAnglesRef.current = orbitAngles;
+  const flyPoseRef = useRef<{
+    position: [number, number, number];
+    yawRad: number;
+    pitchRad: number;
+  }>({
+    position: [0.0, 1.75, 4.2],
+    yawRad: 0.0,
+    pitchRad: -0.12,
+  });
+
+  const pressedKeysRef = useRef<Set<string>>(new Set());
+  const viewModeRef = useRef<ViewportCameraMode>(viewMode);
+  viewModeRef.current = viewMode;
+  const onToggleViewModeRef = useRef(onToggleViewMode);
+  onToggleViewModeRef.current = onToggleViewMode;
 
   useEffect(() => {
     setOrbitAngles({
@@ -87,14 +126,24 @@ export function VenueViewportStage({
       polarRad: 0.92,
       distanceM: snapshot.places.length > 8 ? 10.6 : 7.2,
     });
-  }, [snapshot.sceneId, snapshot.places.length]);
+    setSelectedEmptyPlaceId(null);
+    flyPoseRef.current = {
+      position: [0.0, 1.85, 4.4],
+      yawRad: 0.0,
+      pitchRad: -0.14,
+    };
+  }, [snapshot.sceneId]);
 
   const dragStateRef = useRef<{
     dragging: boolean;
+    startX: number;
+    startY: number;
     lastX: number;
     lastY: number;
   }>({
     dragging: false,
+    startX: 0,
+    startY: 0,
     lastX: 0,
     lastY: 0,
   });
@@ -110,6 +159,9 @@ export function VenueViewportStage({
     : undefined;
   const selectedPlace = selectedAttendee
     ? snapshot.places.find((p) => p.id === selectedAttendee.assignedPlaceId)
+    : undefined;
+  const selectedEmptyPlace = selectedEmptyPlaceId
+    ? snapshot.places.find((p) => p.id === selectedEmptyPlaceId)
     : undefined;
 
   const obstructedAttendees = useMemo(
@@ -130,6 +182,7 @@ export function VenueViewportStage({
       snapshot.roster.length;
     const nextMember = snapshot.roster[nextIdx];
     if (nextMember) {
+      setSelectedEmptyPlaceId(null);
       onSelectAttendee(nextMember.attendeeId);
     }
   };
@@ -142,30 +195,213 @@ export function VenueViewportStage({
     const nextIssue =
       obstructedAttendees[(idx + 1) % obstructedAttendees.length];
     if (nextIssue) {
+      setSelectedEmptyPlaceId(null);
       onSelectAttendee(nextIssue.attendeeId);
     }
   };
 
+  // 1. Mount / Unmount Effect: Persistent WebGLRenderer + WASD/E/C/Shift Flythrough loop
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
-
-    const width = Math.max(320, container.clientWidth);
-    const height = Math.max(320, container.clientHeight);
+    if (!container || typeof document === 'undefined') return;
 
     let renderer: THREE.WebGLRenderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: 'high-performance',
+      });
     } catch {
       return;
     }
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const width = Math.max(320, container.clientWidth);
+    const height = Math.max(320, container.clientHeight);
     renderer.setSize(width, height);
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    const scene = new THREE.Scene();
+    rendererRef.current = renderer;
+    sceneRef.current = new THREE.Scene();
+    cameraRef.current = new THREE.PerspectiveCamera(
+      52,
+      width / height,
+      INSPECTION_CAMERA.nearM,
+      INSPECTION_CAMERA.farM,
+    );
+
+    const handleResize = (): void => {
+      renderFrameRef.current?.();
+    };
+
+    const isFormInputFocused = (target: EventTarget | null): boolean => {
+      const el = (target ?? document.activeElement) as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName?.toUpperCase();
+      return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        el.isContentEditable
+      );
+    };
+
+    const FLY_KEYS = new Set(['w', 'a', 's', 'd', 'e', 'c', 'shift']);
+
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isFormInputFocused(e.target)) return;
+      const key = e.key.toLowerCase();
+      if (!FLY_KEYS.has(key)) return;
+
+      if (viewModeRef.current !== 'flythrough' && key !== 'shift') {
+        const cam = cameraRef.current;
+        if (cam) {
+          const dir = new THREE.Vector3();
+          cam.getWorldDirection(dir);
+          const yaw = Math.atan2(-dir.x, -dir.z);
+          const pitch = Math.asin(Math.max(-0.95, Math.min(0.95, dir.y)));
+          flyPoseRef.current = {
+            position: [cam.position.x, cam.position.y, cam.position.z],
+            yawRad: yaw,
+            pitchRad: pitch,
+          };
+        }
+        onToggleViewModeRef.current('flythrough');
+      }
+
+      pressedKeysRef.current.add(key);
+    };
+
+    const handleKeyUp = (e: KeyboardEvent): void => {
+      const key = e.key.toLowerCase();
+      pressedKeysRef.current.delete(key);
+    };
+
+    const clearKeys = (): void => {
+      pressedKeysRef.current.clear();
+    };
+
+    let rafId: number | null = null;
+    let lastTimeMs = performance.now();
+    let hudTickCounter = 0;
+
+    const stepFlythroughFrame = (nowMs: number): void => {
+      const dtSec = Math.min(0.1, Math.max(0.001, (nowMs - lastTimeMs) / 1000));
+      lastTimeMs = nowMs;
+
+      if (
+        viewModeRef.current === 'flythrough' &&
+        pressedKeysRef.current.size > 0
+      ) {
+        const keys = pressedKeysRef.current;
+        const isTurbo = keys.has('shift');
+        const speedMps = isTurbo ? 10.5 : 3.6;
+        const stepM = speedMps * dtSec;
+
+        const yaw = flyPoseRef.current.yawRad;
+        const fwdX = -Math.sin(yaw);
+        const fwdZ = -Math.cos(yaw);
+        const rightX = Math.cos(yaw);
+        const rightZ = -Math.sin(yaw);
+
+        let moveX = 0;
+        let moveY = 0;
+        let moveZ = 0;
+
+        if (keys.has('w')) {
+          moveX += fwdX;
+          moveZ += fwdZ;
+        }
+        if (keys.has('s')) {
+          moveX -= fwdX;
+          moveZ -= fwdZ;
+        }
+        if (keys.has('d')) {
+          moveX += rightX;
+          moveZ += rightZ;
+        }
+        if (keys.has('a')) {
+          moveX -= rightX;
+          moveZ -= rightZ;
+        }
+        if (keys.has('e')) {
+          moveY += 1;
+        }
+        if (keys.has('c')) {
+          moveY -= 1;
+        }
+
+        const horizMag = Math.hypot(moveX, moveZ);
+        if (horizMag > 1e-5) {
+          flyPoseRef.current.position[0] += (moveX / horizMag) * stepM;
+          flyPoseRef.current.position[2] += (moveZ / horizMag) * stepM;
+        }
+        if (moveY !== 0) {
+          flyPoseRef.current.position[1] = Math.max(
+            0.25,
+            Math.min(12.0, flyPoseRef.current.position[1] + moveY * stepM),
+          );
+        }
+
+        if (horizMag > 1e-5 || moveY !== 0) {
+          renderFrameRef.current?.();
+          hudTickCounter += 1;
+          if (hudTickCounter % 4 === 0) {
+            setFlyHudReadout({
+              pos: [...flyPoseRef.current.position],
+              turbo: isTurbo,
+            });
+          }
+        }
+      }
+
+      rafId = window.requestAnimationFrame(stepFlythroughFrame);
+    };
+
+    rafId = window.requestAnimationFrame(stepFlythroughFrame);
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', clearKeys);
+    document.addEventListener('visibilitychange', clearKeys);
+
+    return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', clearKeys);
+      document.removeEventListener('visibilitychange', clearKeys);
+      if (sceneRef.current) {
+        disposeVenueScene(sceneRef.current);
+        sceneRef.current = null;
+      }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        try {
+          rendererRef.current.forceContextLoss();
+        } catch {
+          // Ignore if extension unavailable
+        }
+        rendererRef.current = null;
+      }
+      cameraRef.current = null;
+      container.innerHTML = '';
+    };
+  }, []);
+
+  // 2. Scene Rebuild Effect
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    disposeVenueScene(scene);
+
     populateThreeSceneFromSnapshot(scene, snapshot, {
       hideAttendeeId:
         viewMode === 'attendee_pov' ? selectedAttendeeId : undefined,
@@ -174,89 +410,189 @@ export function VenueViewportStage({
 
     const proxyMap = new Map<string, THREE.Object3D>();
     scene.traverse((child) => {
-      if (child.name.startsWith('proxy_attendee_torso_') && child.userData?.ownerAttendeeId) {
+      if (
+        child.name.startsWith('proxy_attendee_torso_') &&
+        child.userData?.ownerAttendeeId
+      ) {
         proxyMap.set(child.userData.ownerAttendeeId as string, child);
       }
     });
     attendeeProxyNodesRef.current = proxyMap;
 
-    // Add route polylines and dynamic final-approach segments in overview mode
-    if (viewMode === 'overview') {
-      for (const route of snapshot.routes) {
-        if (route.waypoints.length >= 2) {
-          const pts = route.waypoints.map(
-            ([x, z]) => new THREE.Vector3(x, 0.03, z),
+    let cancelled = false;
+    const cachedGroup = getUploadedGlbGroupForScene(snapshot.sceneId);
+    const rawGlbBytes = getUploadedGlbBytesForScene(snapshot.sceneId);
+    if (!cachedGroup && rawGlbBytes && rawGlbBytes.byteLength > 20_000) {
+      const loader = new GLTFLoader();
+      const sliceBuffer = rawGlbBytes.buffer.slice(
+        rawGlbBytes.byteOffset,
+        rawGlbBytes.byteOffset + rawGlbBytes.byteLength,
+      ) as ArrayBuffer;
+      loader.parse(
+        sliceBuffer,
+        '',
+        (gltf) => {
+          if (cancelled || sceneRef.current !== scene) return;
+          const align = getGlbAlignmentForScene(snapshot.sceneId);
+          const archGroup = gltf.scene;
+          archGroup.name = 'uploaded_glb_architectural_shell';
+          archGroup.rotation.y = align.rotationYRad;
+          archGroup.scale.set(align.scale, align.scale, align.scale);
+          archGroup.position.set(
+            align.position[0],
+            align.position[1],
+            align.position[2],
           );
-          const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
-          const lineMat = new THREE.LineBasicMaterial({
-            color: 0x38bdf8,
-            transparent: true,
-            opacity: 0.45,
-          });
-          scene.add(new THREE.Line(lineGeo, lineMat));
-        }
-      }
+          scene.add(archGroup);
+          renderFrameRef.current?.();
+        },
+        () => {
+          // Ignore parse error
+        },
+      );
+    }
 
-      for (const member of snapshot.roster) {
-        const place = snapshot.places.find(
-          (p) => p.id === member.assignedPlaceId,
-        );
-        const obj = snapshot.objects.find((o) => o.id === place?.objectId);
-        if (!place || !obj) continue;
+    const occupantByPlaceId = new Map(
+      snapshot.roster.map((m) => [m.assignedPlaceId, m]),
+    );
 
-        const isSelected = member.attendeeId === selectedAttendeeId;
-        const attEval = evaluation.attendees[member.attendeeId];
-        const ringColor = !attEval
-          ? 0x94a3b8
-          : attEval.clearAndUsable
-            ? 0x10b981
-            : 0xef4444;
+    if (viewMode !== 'attendee_pov') {
+      const seatBeaconGeo = new THREE.SphereGeometry(0.095, 16, 16);
+      const seatStemGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.24, 8);
 
-        // Selection / status ring on floor under seat/bay
+      // Render 3D Seat Indicators for ALL parsed places at their true 3D [x, y, z] elevation
+      for (const place of snapshot.places) {
+        const obj = snapshot.objects.find((o) => o.id === place.objectId);
+        if (!obj) continue;
+
+        const baseX = obj.transform.position[0];
+        const baseY = obj.transform.position[1];
+        const baseZ = obj.transform.position[2];
+        const seatPanY =
+          baseY + (place.kind === 'chair' ? place.seatHeightM : 0.04);
+
+        const occupant = occupantByPlaceId.get(place.id);
+        const isSelectedOccupant =
+          occupant && occupant.attendeeId === selectedAttendeeId;
+        const isSelectedEmpty =
+          !occupant && place.id === selectedEmptyPlaceId;
+        const attEval = occupant
+          ? evaluation.attendees[occupant.attendeeId]
+          : undefined;
+
+        const indicatorColor = isSelectedOccupant || isSelectedEmpty
+          ? 0x38bdf8
+          : occupant
+            ? !attEval
+              ? 0x94a3b8
+              : attEval.clearAndUsable
+                ? 0x10b981
+                : 0xef4444
+            : 0x0ea5e9;
+
         const chairElevation = Math.max(0.04, obj.transform.position[1]);
         const ringGeo = new THREE.RingGeometry(
-          isSelected ? 0.44 : 0.36,
-          isSelected ? 0.54 : 0.43,
-          32,
+          isSelectedOccupant || isSelectedEmpty ? 0.22 : 0.17,
+          isSelectedOccupant || isSelectedEmpty ? 0.30 : 0.24,
+          28,
         );
         const ringMat = new THREE.MeshBasicMaterial({
-          color: isSelected ? 0x60a5fa : ringColor,
+          color: indicatorColor,
           side: THREE.DoubleSide,
-          transparent: true,
-          opacity: isSelected ? 0.95 : 0.72,
+          transparent: !occupant && !isSelectedEmpty,
+          opacity: !occupant && !isSelectedEmpty ? 0.82 : 0.98,
         });
         const ringMesh = new THREE.Mesh(ringGeo, ringMat);
         ringMesh.rotation.x = -Math.PI / 2;
-        ringMesh.position.set(
-          obj.transform.position[0],
-          chairElevation + 0.005,
-          obj.transform.position[2],
-        );
+        ringMesh.position.set(baseX, seatPanY + 0.02, baseZ);
+        ringMesh.userData = {
+          placeId: place.id,
+          attendeeId: occupant?.attendeeId,
+        };
         scene.add(ringMesh);
 
         // Final approach segment from routeAnchorPoint to seat
-        const approachPts = [
-          new THREE.Vector3(
-            place.routeAnchorPoint[0],
-            chairElevation + 0.01,
-            place.routeAnchorPoint[1],
-          ),
-          new THREE.Vector3(
-            obj.transform.position[0],
-            chairElevation + 0.01,
-            obj.transform.position[2],
-          ),
-        ];
-        const appGeo = new THREE.BufferGeometry().setFromPoints(approachPts);
-        const appMat = new THREE.LineBasicMaterial({
-          color: attEval?.routeStatus === 'blocked' ? 0xef4444 : 0x22c55e,
+        if (occupant) {
+          const approachPts = [
+            new THREE.Vector3(
+              place.routeAnchorPoint[0],
+              chairElevation + 0.01,
+              place.routeAnchorPoint[1],
+            ),
+            new THREE.Vector3(
+              obj.transform.position[0],
+              chairElevation + 0.01,
+              obj.transform.position[2],
+            ),
+          ];
+          const appGeo = new THREE.BufferGeometry().setFromPoints(approachPts);
+          const appMat = new THREE.LineBasicMaterial({
+            color: attEval?.routeStatus === 'blocked' ? 0xef4444 : 0x22c55e,
+          });
+          scene.add(new THREE.Line(appGeo, appMat));
+        }
+
+        if (!occupant || isSelectedOccupant) {
+          const beaconMat = new THREE.MeshBasicMaterial({
+            color: isSelectedEmpty ? 0xfacc15 : indicatorColor,
+          });
+          const beaconMesh = new THREE.Mesh(seatBeaconGeo, beaconMat);
+          beaconMesh.position.set(baseX, seatPanY + 0.26, baseZ);
+          beaconMesh.userData = {
+            placeId: place.id,
+            attendeeId: occupant?.attendeeId,
+          };
+          scene.add(beaconMesh);
+
+          const stemMat = new THREE.MeshBasicMaterial({
+            color: indicatorColor,
+            transparent: true,
+            opacity: 0.7,
+          });
+          const stemMesh = new THREE.Mesh(seatStemGeo, stemMat);
+          stemMesh.position.set(baseX, seatPanY + 0.14, baseZ);
+          stemMesh.userData = {
+            placeId: place.id,
+            attendeeId: occupant?.attendeeId,
+          };
+          scene.add(stemMesh);
+        }
+
+        const hitGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.65, 16);
+        const hitMat = new THREE.MeshBasicMaterial({
+          color: 0x38bdf8,
           transparent: true,
-          opacity: 0.4,
+          opacity: isSelectedEmpty ? 0.26 : 0.0,
+          depthWrite: false,
         });
-        scene.add(new THREE.Line(appGeo, appMat));
+        const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+        hitMesh.position.set(baseX, seatPanY + 0.22, baseZ);
+        hitMesh.userData = {
+          placeId: place.id,
+          attendeeId: occupant?.attendeeId,
+        };
+        scene.add(hitMesh);
+
+        if (occupant && place.turningPadCenter && place.turningPadDiameterM) {
+          const padR = place.turningPadDiameterM * 0.5;
+          const padGeo = new THREE.RingGeometry(padR - 0.035, padR, 36);
+          const padMat = new THREE.MeshBasicMaterial({
+            color: attEval?.turningSpacePass === false ? 0xef4444 : 0xa78bfa,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.65,
+          });
+          const padMesh = new THREE.Mesh(padGeo, padMat);
+          padMesh.rotation.x = -Math.PI / 2;
+          padMesh.position.set(
+            place.turningPadCenter[0],
+            0.018,
+            place.turningPadCenter[1],
+          );
+          scene.add(padMesh);
+        }
       }
 
-      // Draw baseline -> revised displacement vectors for any object moved by a patch
       for (const obj of snapshot.objects) {
         const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
         const dz = obj.transform.position[2] - obj.baselineTransform.position[2];
@@ -271,7 +607,7 @@ export function VenueViewportStage({
           ghostMesh.rotation.x = -Math.PI / 2;
           ghostMesh.position.set(
             obj.baselineTransform.position[0],
-            0.035,
+            obj.baselineTransform.position[1] + 0.035,
             obj.baselineTransform.position[2],
           );
           scene.add(ghostMesh);
@@ -279,7 +615,7 @@ export function VenueViewportStage({
           const dir = new THREE.Vector3(dx, 0, dz).normalize();
           const origin = new THREE.Vector3(
             obj.baselineTransform.position[0],
-            0.12,
+            obj.baselineTransform.position[1] + 0.12,
             obj.baselineTransform.position[2],
           );
           const arrow = new THREE.ArrowHelper(
@@ -295,8 +631,7 @@ export function VenueViewportStage({
       }
     }
 
-    // Add 15x9 target sample grid & sightline rays when enabled
-    if (showSightlineOverlays && selectedAttendeeId) {
+    if (showSightlineOverlays && selectedAttendeeId && selectedAttendee) {
       const { samplePoints, visibleMask } = computeAttendeeSampleVisibilityMask(
         snapshot,
         selectedAttendeeId,
@@ -313,9 +648,8 @@ export function VenueViewportStage({
         dot.position.set(pt[0], pt[1], pt[2] + 0.02);
         scene.add(dot);
 
-        // In overview mode, draw representative corner & center rays from attendee eye to screen
         if (
-          viewMode === 'overview' &&
+          viewMode !== 'attendee_pov' &&
           (idx === 0 ||
             idx === 14 ||
             idx === 67 ||
@@ -343,139 +677,127 @@ export function VenueViewportStage({
       });
     }
 
-    const camera = new THREE.PerspectiveCamera(
-      viewMode === 'attendee_pov' ? INSPECTION_CAMERA.fovDeg : 52,
-      viewMode === 'attendee_pov' ? INSPECTION_CAMERA.aspect : width / height,
-      INSPECTION_CAMERA.nearM,
-      INSPECTION_CAMERA.farM,
-    );
-
-    if (viewMode === 'attendee_pov' && selectedAttendeeId) {
-      try {
-        const pose = getAttendeeCameraPose(snapshot, selectedAttendeeId);
-        camera.position.set(
-          pose.eyePositionWorld[0],
-          pose.eyePositionWorld[1],
-          pose.eyePositionWorld[2],
-        );
-        camera.lookAt(
-          pose.lookAtWorld[0],
-          pose.lookAtWorld[1],
-          pose.lookAtWorld[2],
-        );
-        // Square 1:1 viewport framing for 90° x 90° inspection camera
-        const side = Math.min(width, height);
-        const offsetX = Math.floor((width - side) * 0.5);
-        const offsetY = Math.floor((height - side) * 0.5);
-        renderer.setScissorTest(true);
-        renderer.setViewport(offsetX, offsetY, side, side);
-        renderer.setScissor(offsetX, offsetY, side, side);
-      } catch {
-        // Fallback if attendee missing
-      }
-    } else {
-      const currentOrbit = orbitAnglesRef.current;
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, width, height);
-      const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
-      const cx =
-        targetPivot.x +
-        currentOrbit.distanceM *
-          Math.sin(currentOrbit.polarRad) *
-          Math.sin(currentOrbit.azimuthRad);
-      const cy =
-        targetPivot.y +
-        currentOrbit.distanceM * Math.cos(currentOrbit.polarRad);
-      const cz =
-        targetPivot.z +
-        currentOrbit.distanceM *
-          Math.sin(currentOrbit.polarRad) *
-          Math.cos(currentOrbit.azimuthRad);
-      camera.position.set(cx, cy, cz);
-      camera.lookAt(targetPivot);
-    }
-
-    rendererRef.current = renderer;
-    sceneRef.current = scene;
-    cameraRef.current = camera;
-
-    renderer.render(scene, camera);
-
-    const handleResize = (): void => {
-      if (!containerRef.current) return;
-      const w = Math.max(320, containerRef.current.clientWidth);
-      const h = Math.max(320, containerRef.current.clientHeight);
-      renderer.setSize(w, h);
-      if (viewMode === 'attendee_pov') {
-        const side = Math.min(w, h);
-        const ox = Math.floor((w - side) * 0.5);
-        const oy = Math.floor((h - side) * 0.5);
-        renderer.setScissorTest(true);
-        renderer.setViewport(ox, oy, side, side);
-        renderer.setScissor(ox, oy, side, side);
-      } else {
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-      }
-      renderer.render(scene, camera);
-    };
-
-    window.addEventListener('resize', handleResize);
     return () => {
-      window.removeEventListener('resize', handleResize);
-      rendererRef.current = null;
-      sceneRef.current = null;
-      cameraRef.current = null;
-      renderer.dispose();
+      cancelled = true;
     };
   }, [
     snapshot,
     selectedAttendeeId,
+    selectedAttendee,
+    selectedEmptyPlaceId,
     viewMode,
     evaluation,
     showSightlineOverlays,
   ]);
 
-  // Lightweight camera orbit update without recreating WebGLRenderer or Three.js scene
+  // 3. Camera & Render Effect
   useEffect(() => {
-    if (viewMode !== 'overview') return;
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    if (!renderer || !scene || !camera) return;
+    const renderCurrentFrame = (): void => {
+      const container = containerRef.current;
+      const renderer = rendererRef.current;
+      const scene = sceneRef.current;
+      const camera = cameraRef.current;
+      if (!container || !renderer || !scene || !camera) return;
 
-    const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
-    const cx =
-      targetPivot.x +
-      orbitAngles.distanceM *
-        Math.sin(orbitAngles.polarRad) *
-        Math.sin(orbitAngles.azimuthRad);
-    const cy =
-      targetPivot.y + orbitAngles.distanceM * Math.cos(orbitAngles.polarRad);
-    const cz =
-      targetPivot.z +
-      orbitAngles.distanceM *
-        Math.sin(orbitAngles.polarRad) *
-        Math.cos(orbitAngles.azimuthRad);
-    camera.position.set(cx, cy, cz);
-    camera.lookAt(targetPivot);
-    renderer.render(scene, camera);
-  }, [orbitAngles, viewMode]);
+      const width = Math.max(320, container.clientWidth);
+      const height = Math.max(320, container.clientHeight);
+      renderer.setSize(width, height, false);
+
+      if (viewMode === 'attendee_pov' && selectedAttendeeId && selectedAttendee) {
+        try {
+          const pose = getAttendeeCameraPose(snapshot, selectedAttendeeId);
+          camera.fov = INSPECTION_CAMERA.fovDeg;
+          camera.aspect = INSPECTION_CAMERA.aspect;
+          camera.up.set(0, 1, 0);
+          camera.updateProjectionMatrix();
+          camera.position.set(
+            pose.eyePositionWorld[0],
+            pose.eyePositionWorld[1],
+            pose.eyePositionWorld[2],
+          );
+          camera.lookAt(
+            pose.lookAtWorld[0],
+            pose.lookAtWorld[1],
+            pose.lookAtWorld[2],
+          );
+          const side = Math.min(width, height);
+          const offsetX = Math.floor((width - side) * 0.5);
+          const offsetY = Math.floor((height - side) * 0.5);
+          renderer.setScissorTest(true);
+          renderer.setViewport(offsetX, offsetY, side, side);
+          renderer.setScissor(offsetX, offsetY, side, side);
+        } catch {
+          // Fallback if attendee missing
+        }
+      } else if (viewMode === 'flythrough') {
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, width, height);
+        camera.fov = 62;
+        camera.aspect = width / height;
+        camera.up.set(0, 1, 0);
+        camera.updateProjectionMatrix();
+
+        const [px, py, pz] = flyPoseRef.current.position;
+        const yaw = flyPoseRef.current.yawRad;
+        const pitch = flyPoseRef.current.pitchRad;
+        const cosPitch = Math.cos(pitch);
+        const lookX = px - Math.sin(yaw) * cosPitch;
+        const lookY = py + Math.sin(pitch);
+        const lookZ = pz - Math.cos(yaw) * cosPitch;
+
+        camera.position.set(px, py, pz);
+        camera.lookAt(lookX, lookY, lookZ);
+      } else {
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, width, height);
+        camera.fov = 52;
+        camera.aspect = width / height;
+        camera.up.set(0, 1, 0);
+        camera.updateProjectionMatrix();
+
+        const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
+        const cx =
+          targetPivot.x +
+          orbitAngles.distanceM *
+            Math.sin(orbitAngles.polarRad) *
+            Math.sin(orbitAngles.azimuthRad);
+        const cy =
+          targetPivot.y +
+          orbitAngles.distanceM * Math.cos(orbitAngles.polarRad);
+        const cz =
+          targetPivot.z +
+          orbitAngles.distanceM *
+            Math.sin(orbitAngles.polarRad) *
+            Math.cos(orbitAngles.azimuthRad);
+        camera.position.set(cx, cy, cz);
+        camera.lookAt(targetPivot);
+      }
+
+      renderer.render(scene, camera);
+    };
+
+    renderFrameRef.current = renderCurrentFrame;
+    renderCurrentFrame();
+  }, [
+    snapshot,
+    selectedAttendeeId,
+    selectedAttendee,
+    selectedEmptyPlaceId,
+    viewMode,
+    evaluation,
+    showSightlineOverlays,
+    orbitAngles,
+  ]);
 
   // Apply evacuation step whenever evacTimeSec or evacSimResult changes
   useEffect(() => {
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    if (!renderer || !scene || !camera) return;
-
     const counts = updateSceneEvacuationStep(
       attendeeProxyNodesRef.current,
       evacSimResult,
       evacTimeSec,
     );
     setEvacCounts(counts);
-    renderer.render(scene, camera);
+    renderFrameRef.current?.();
   }, [evacSimResult, evacTimeSec, snapshot]);
 
   // RequestAnimationFrame playback loop for evacuation simulation
@@ -510,6 +832,28 @@ export function VenueViewportStage({
     setEvacMode(nextMode);
     setEvacTimeSec(0);
     setIsPlayingEvac(nextMode !== 'none');
+  };
+
+  const handleSwitchMode = (nextMode: ViewportCameraMode): void => {
+    if (nextMode === 'flythrough' && viewMode !== 'flythrough') {
+      const cam = cameraRef.current;
+      if (cam) {
+        const dir = new THREE.Vector3();
+        cam.getWorldDirection(dir);
+        const yaw = Math.atan2(-dir.x, -dir.z);
+        const pitch = Math.asin(Math.max(-0.95, Math.min(0.95, dir.y)));
+        flyPoseRef.current = {
+          position: [cam.position.x, cam.position.y, cam.position.z],
+          yawRad: yaw,
+          pitchRad: pitch,
+        };
+        setFlyHudReadout({
+          pos: [cam.position.x, cam.position.y, cam.position.z],
+          turbo: false,
+        });
+      }
+    }
+    onToggleViewMode(nextMode);
   };
 
   const visPct = selectedEval
@@ -548,7 +892,7 @@ export function VenueViewportStage({
           pointerEvents: 'none',
         }}
       >
-        {/* Left: Camera Mode Switcher + Ray Overlay Toggle */}
+        {/* Left: Camera Mode Switcher + Ray Overlay Toggle + Evacuation Switcher */}
         <div
           className="vp-hud-bar"
           style={{
@@ -564,24 +908,20 @@ export function VenueViewportStage({
               className={`vp-segment-btn vp-focusable ${
                 viewMode === 'overview' ? 'vp-segment-btn-active' : ''
               }`}
-              onClick={() => onToggleViewMode('overview')}
+              onClick={() => handleSwitchMode('overview')}
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                <line x1="12" x2="12" y1="22.08" y2="12" />
-              </svg>
               <span>Room Orbit</span>
+            </button>
+
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                viewMode === 'flythrough' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSwitchMode('flythrough')}
+              title="POV Flythrough: WASD lateral movement, E/C up & down, Shift 3x speed boost, mouse drag to look"
+            >
+              <span>POV Flythrough (WASD+E/C)</span>
             </button>
 
             <button
@@ -589,22 +929,9 @@ export function VenueViewportStage({
               className={`vp-segment-btn vp-focusable ${
                 viewMode === 'attendee_pov' ? 'vp-segment-btn-active' : ''
               }`}
-              onClick={() => onToggleViewMode('attendee_pov')}
+              disabled={!selectedAttendee}
+              onClick={() => handleSwitchMode('attendee_pov')}
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
               <span>Seat POV</span>
             </button>
           </div>
@@ -734,20 +1061,50 @@ export function VenueViewportStage({
               onClick={jumpToNextIssue}
             >
               <span className="vp-status-dot vp-status-dot-fail" />
-              <span>
-                Next Issue ({obstructedAttendees.length})
-              </span>
+              <span>Next Issue ({obstructedAttendees.length})</span>
             </button>
           )}
         </div>
       </div>
+
+      {/* Flythrough Controls Banner when in Flythrough mode */}
+      {viewMode === 'flythrough' && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '60px',
+            left: '16px',
+            zIndex: 10,
+            padding: '6px 12px',
+            borderRadius: 'var(--radius-card)',
+            background: 'rgba(15, 23, 42, 0.88)',
+            border: '1px solid rgba(56, 189, 248, 0.45)',
+            color: '#e0f2fe',
+            fontSize: '0.74rem',
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}
+        >
+          <span>
+            <strong>Flythrough:</strong> <code>W A S D</code> Move ·{' '}
+            <code>E / C</code> Up / Down · <code>Shift</code> 3× Speed ·{' '}
+            <code>Drag Mouse</code> Look
+          </span>
+          <span className="mono" style={{ color: '#38bdf8' }}>
+            [{flyHudReadout.pos.map((v) => v.toFixed(1)).join(', ')}]m{' '}
+            {flyHudReadout.turbo ? '⚡3×' : ''}
+          </span>
+        </div>
+      )}
 
       {/* Live Egress / Emergency Evacuation Telemetry HUD Banner */}
       {evacMode !== 'none' && evacSimResult && (
         <div
           style={{
             position: 'absolute',
-            top: '60px',
+            top: viewMode === 'flythrough' ? '100px' : '60px',
             left: '16px',
             right: '16px',
             zIndex: 9,
@@ -872,54 +1229,117 @@ export function VenueViewportStage({
       <div
         ref={containerRef}
         onMouseDown={(e) => {
-          if (viewMode !== 'overview') return;
+          if (viewMode === 'attendee_pov') return;
           dragStateRef.current = {
             dragging: true,
+            startX: e.clientX,
+            startY: e.clientY,
             lastX: e.clientX,
             lastY: e.clientY,
           };
         }}
         onMouseMove={(e) => {
-          if (!dragStateRef.current.dragging || viewMode !== 'overview') return;
+          if (!dragStateRef.current.dragging || viewMode === 'attendee_pov') {
+            return;
+          }
           const dx = e.clientX - dragStateRef.current.lastX;
           const dy = e.clientY - dragStateRef.current.lastY;
           dragStateRef.current.lastX = e.clientX;
           dragStateRef.current.lastY = e.clientY;
-          setOrbitAngles((prev) => ({
-            ...prev,
-            azimuthRad: prev.azimuthRad - dx * 0.007,
-            polarRad: Math.max(
-              0.25,
-              Math.min(1.42, prev.polarRad - dy * 0.007),
-            ),
-          }));
+
+          if (viewMode === 'flythrough') {
+            flyPoseRef.current.yawRad -= dx * 0.0055;
+            flyPoseRef.current.pitchRad = Math.max(
+              -1.42,
+              Math.min(1.42, flyPoseRef.current.pitchRad - dy * 0.0055),
+            );
+            renderFrameRef.current?.();
+          } else {
+            setOrbitAngles((prev) => ({
+              ...prev,
+              azimuthRad: prev.azimuthRad - dx * 0.007,
+              polarRad: Math.max(
+                0.22,
+                Math.min(1.45, prev.polarRad - dy * 0.007),
+              ),
+            }));
+          }
         }}
-        onMouseUp={() => {
+        onMouseUp={(e) => {
+          const wasDragging = dragStateRef.current.dragging;
           dragStateRef.current.dragging = false;
+          if (!wasDragging || viewMode === 'attendee_pov') return;
+
+          const dist = Math.hypot(
+            e.clientX - dragStateRef.current.startX,
+            e.clientY - dragStateRef.current.startY,
+          );
+          if (
+            dist < 6 &&
+            containerRef.current &&
+            sceneRef.current &&
+            cameraRef.current
+          ) {
+            const rect = containerRef.current.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              const ndc = new THREE.Vector2(
+                ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                -((e.clientY - rect.top) / rect.height) * 2 + 1,
+              );
+              const raycaster = new THREE.Raycaster();
+              raycaster.setFromCamera(ndc, cameraRef.current);
+              const hits = raycaster.intersectObjects(
+                sceneRef.current.children,
+                true,
+              );
+              for (const hit of hits) {
+                let cur: THREE.Object3D | null = hit.object;
+                while (cur) {
+                  if (typeof cur.userData?.attendeeId === 'string') {
+                    setSelectedEmptyPlaceId(null);
+                    onSelectAttendee?.(cur.userData.attendeeId);
+                    return;
+                  }
+                  if (typeof cur.userData?.placeId === 'string') {
+                    setSelectedEmptyPlaceId(cur.userData.placeId);
+                    return;
+                  }
+                  cur = cur.parent;
+                }
+              }
+            }
+          }
         }}
         onMouseLeave={() => {
           dragStateRef.current.dragging = false;
         }}
         onWheel={(e) => {
-          if (viewMode !== 'overview') return;
-          setOrbitAngles((prev) => ({
-            ...prev,
-            distanceM: Math.max(
-              3.2,
-              Math.min(13.5, prev.distanceM + e.deltaY * 0.005),
-            ),
-          }));
+          if (viewMode === 'overview') {
+            setOrbitAngles((prev) => ({
+              ...prev,
+              distanceM: Math.max(
+                3.2,
+                Math.min(24.0, prev.distanceM + e.deltaY * 0.006),
+              ),
+            }));
+          } else if (viewMode === 'flythrough') {
+            const yaw = flyPoseRef.current.yawRad;
+            const step = -e.deltaY * 0.004;
+            flyPoseRef.current.position[0] += -Math.sin(yaw) * step;
+            flyPoseRef.current.position[2] += -Math.cos(yaw) * step;
+            renderFrameRef.current?.();
+          }
         }}
         style={{
           flex: 1,
           width: '100%',
           height: '100%',
-          cursor: viewMode === 'overview' ? 'grab' : 'default',
+          cursor: viewMode === 'attendee_pov' ? 'default' : 'grab',
         }}
       />
 
-      {/* Sleek Bottom-Center Floating Guest Dock */}
-      {selectedAttendee && selectedEval && (
+      {/* Sleek Bottom-Center Floating Guest / Empty-Seat Dock */}
+      {(selectedEmptyPlace || (selectedAttendee && selectedEval)) && (
         <div
           style={{
             position: 'absolute',
@@ -939,128 +1359,180 @@ export function VenueViewportStage({
               alignItems: 'center',
               gap: '12px',
               padding: '8px 12px',
-              maxWidth: '680px',
+              maxWidth: '740px',
             }}
           >
-            {/* Prev / Next Guest Stepper */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                type="button"
-                aria-label="Previous guest"
-                className="vp-btn"
-                style={{ padding: '5px 8px' }}
-                onClick={() => stepAttendee(-1)}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                aria-label="Next guest"
-                className="vp-btn"
-                style={{ padding: '5px 8px' }}
-                onClick={() => stepAttendee(1)}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
-              </button>
-            </div>
+            {selectedEmptyPlace ? (
+              <>
+                <div>
+                  <div
+                    style={{
+                      fontSize: '0.71rem',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    Selected Empty 3D Seat
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>
+                    {selectedEmptyPlace.label} ({selectedEmptyPlace.id})
+                  </div>
+                </div>
+                {onAddAttendeeAtPlace && (
+                  <button
+                    type="button"
+                    className="vp-btn vp-btn-primary"
+                    style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+                    onClick={() => {
+                      onAddAttendeeAtPlace(selectedEmptyPlace.id);
+                      setSelectedEmptyPlaceId(null);
+                    }}
+                  >
+                    + Add Person to {selectedEmptyPlace.label}
+                  </button>
+                )}
+              </>
+            ) : (
+              selectedAttendee &&
+              selectedEval && (
+                <>
+                  {/* Prev / Next Guest Stepper */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Previous guest"
+                      className="vp-btn"
+                      style={{ padding: '5px 8px' }}
+                      onClick={() => stepAttendee(-1)}
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Next guest"
+                      className="vp-btn"
+                      style={{ padding: '5px 8px' }}
+                      onClick={() => stepAttendee(1)}
+                    >
+                      ›
+                    </button>
+                  </div>
 
-            <div className="vp-divider-v" />
+                  <div className="vp-divider-v" />
 
-            {/* Selected Guest Identity */}
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  fontWeight: 600,
-                  fontSize: '0.83rem',
-                }}
-              >
-                <span>{cleanGuestName(selectedAttendee.label)}</span>
-                <span
-                  className="mono"
-                  style={{
-                    fontSize: '0.71rem',
-                    padding: '1px 6px',
-                    borderRadius: '4px',
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-subtle)',
-                    color: 'var(--text-secondary)',
-                  }}
-                >
-                  {seatBadge}
-                </span>
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                {selectedProfile?.label ?? selectedAttendee.profileId}
-              </div>
-            </div>
+                  {/* Selected Guest Identity */}
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '7px',
+                        fontWeight: 600,
+                        fontSize: '0.83rem',
+                      }}
+                    >
+                      <span>{cleanGuestName(selectedAttendee.label)}</span>
+                      <span
+                        className="mono"
+                        style={{
+                          fontSize: '0.71rem',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          background: 'var(--bg-elevated)',
+                          border: '1px solid var(--border-subtle)',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        {seatBadge}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.72rem',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      {selectedProfile?.label ?? selectedAttendee.profileId}
+                    </div>
+                  </div>
 
-            <div className="vp-divider-v" />
+                  <div className="vp-divider-v" />
 
-            {/* Sightline Status Pill */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span
-                className={`vp-badge ${
-                  selectedEval.clearAndUsable ? 'vp-badge-pass' : 'vp-badge-fail'
-                }`}
-              >
-                <span
-                  className={`vp-status-dot ${
-                    selectedEval.clearAndUsable
-                      ? 'vp-status-dot-pass'
-                      : 'vp-status-dot-fail'
-                  }`}
-                />
-                <span>
-                  {visPct}% Sightline ({selectedEval.visibleSamples}/
-                  {selectedEval.totalSamples})
-                </span>
-              </span>
-            </div>
+                  {/* Sightline Status Pill */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <span
+                      className={`vp-badge ${
+                        selectedEval.clearAndUsable
+                          ? 'vp-badge-pass'
+                          : 'vp-badge-fail'
+                      }`}
+                    >
+                      <span
+                        className={`vp-status-dot ${
+                          selectedEval.clearAndUsable
+                            ? 'vp-status-dot-pass'
+                            : 'vp-status-dot-fail'
+                        }`}
+                      />
+                      <span>
+                        {visPct}% Sightline ({selectedEval.visibleSamples}/
+                        {selectedEval.totalSamples})
+                      </span>
+                    </span>
+                  </div>
 
-            <div className="vp-divider-v" />
+                  <div className="vp-divider-v" />
 
-            {/* 1-Click Toggle between Seat POV and Room Orbit */}
-            <button
-              type="button"
-              className={`vp-btn ${
-                viewMode === 'attendee_pov' ? 'vp-btn-primary' : ''
-              }`}
-              style={{ padding: '5px 10px', fontSize: '0.75rem' }}
-              onClick={() =>
-                onToggleViewMode(
-                  viewMode === 'attendee_pov' ? 'overview' : 'attendee_pov',
-                )
-              }
-            >
-              {viewMode === 'attendee_pov' ? 'Back to Orbit' : 'Inspect POV'}
-            </button>
+                  {/* 1-Click Toggle between Seat POV and Room Orbit */}
+                  <button
+                    type="button"
+                    className={`vp-btn ${
+                      viewMode === 'attendee_pov' ? 'vp-btn-primary' : ''
+                    }`}
+                    style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+                    onClick={() =>
+                      handleSwitchMode(
+                        viewMode === 'attendee_pov'
+                          ? 'overview'
+                          : 'attendee_pov',
+                      )
+                    }
+                  >
+                    {viewMode === 'attendee_pov'
+                      ? 'Back to Orbit'
+                      : 'Inspect POV'}
+                  </button>
+
+                  {onRemoveAttendee && (
+                    <button
+                      type="button"
+                      className="vp-btn"
+                      style={{
+                        padding: '5px 9px',
+                        fontSize: '0.73rem',
+                        color: 'var(--status-fail-text)',
+                      }}
+                      onClick={() =>
+                        onRemoveAttendee(selectedAttendee.attendeeId)
+                      }
+                    >
+                      Remove
+                    </button>
+                  )}
+                </>
+              )
+            )}
           </div>
         </div>
       )}

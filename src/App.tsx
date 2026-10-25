@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDevFixtureSnapshot,
+  withUpdatedSceneHash,
   type CaptureTourSpec,
   type Evaluation,
   type EvidenceFinding,
@@ -12,6 +13,11 @@ import {
 import {
   createBunchedEmergencyVenueSnapshot,
   createPreparedVenueSnapshot,
+  generateSampleCustomAuditoriumGlb,
+  parseAndLabelGlbVenueAsync,
+  spawnRandomFourAttendees,
+  type GlbParseProgressUpdate,
+  type GlbVenueParseReport,
 } from './scene/index.js';
 import {
   ComparisonPanel,
@@ -26,12 +32,17 @@ import {
   postCreateRun,
   postPreview,
   uploadRunEvidence,
+  type VenuePresetMode,
+  type ViewportCameraMode,
 } from './ui/index.js';
 
 export function App(): React.ReactElement {
-  const [venuePreset, setVenuePreset] = useState<
-    'prepared_24' | 'bunched_emergency_24' | 'dev_4'
-  >('prepared_24');
+  const [venuePreset, setVenuePreset] =
+    useState<VenuePresetMode>('prepared_24');
+  const [glbParseReport, setGlbParseReport] =
+    useState<GlbVenueParseReport | null>(null);
+  const [glbParseProgress, setGlbParseProgress] =
+    useState<GlbParseProgressUpdate | null>(null);
   const initialSnapshot = useMemo(() => createPreparedVenueSnapshot(), []);
   const [baselineSnapshot, setBaselineSnapshot] =
     useState<SceneSnapshot>(initialSnapshot);
@@ -50,9 +61,7 @@ export function App(): React.ReactElement {
       '',
   );
 
-  const [viewMode, setViewMode] = useState<'overview' | 'attendee_pov'>(
-    'overview',
-  );
+  const [viewMode, setViewMode] = useState<ViewportCameraMode>('overview');
   const [showSightlineOverlays, setShowSightlineOverlays] =
     useState<boolean>(true);
   const [viewingStage, setViewingStage] = useState<'baseline' | 'best'>(
@@ -285,16 +294,82 @@ export function App(): React.ReactElement {
     }
   };
 
-  const handleSelectVenuePreset = (
-    preset: 'prepared_24' | 'bunched_emergency_24' | 'dev_4',
-  ): void => {
+  const handleSelectVenuePreset = (preset: VenuePresetMode): void => {
     if (activeRun && activeRun.state !== 'finished') return;
+    if (preset === 'classroom_50') {
+      void (async () => {
+        setErrorText(null);
+        try {
+          const resp = await fetch('/venue/smallClassroom.glb');
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status} loading /venue/smallClassroom.glb`);
+          }
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          const report = await parseAndLabelGlbVenueAsync(buf, {
+            fileName: 'smallClassroom.glb',
+            yieldDelayMs: 60,
+            standaloneRandomFour: true,
+            onProgress: (upd) => setGlbParseProgress(upd),
+          });
+          setGlbParseReport(report);
+          setVenuePreset('classroom_50');
+          setBaselineSnapshot(report.snapshot);
+          setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+          setActiveRun(null);
+          setViewingStage('baseline');
+          setTimeout(() => setGlbParseProgress(null), 500);
+          setCaptureStatusText(
+            `Loaded 50-Seat University Lecture Classroom (smallClassroom.glb): parsed ${report.counts.seats} 3D chairs across 5 tiers, Sight Target "${report.snapshot.target.id}", and spawned ${report.snapshot.roster.length} people at random.`,
+          );
+          setSelectedAttendeeId(
+            report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+              ?.attendeeId ??
+              report.snapshot.roster[0]?.attendeeId ??
+              '',
+          );
+        } catch (err) {
+          setErrorText(
+            err instanceof Error ? err.message : 'Failed to load smallClassroom.glb',
+          );
+        }
+      })();
+      return;
+    }
+    if (preset === 'custom_glb') {
+      void (async () => {
+        setErrorText(null);
+        const sampleGlb = generateSampleCustomAuditoriumGlb();
+        const report = await parseAndLabelGlbVenueAsync(sampleGlb.glbBytes, {
+          fileName: sampleGlb.fileName,
+          yieldDelayMs: 90,
+          onProgress: (upd) => setGlbParseProgress(upd),
+        });
+        setGlbParseReport(report);
+        setVenuePreset('custom_glb');
+        setBaselineSnapshot(report.snapshot);
+        setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+        setActiveRun(null);
+        setViewingStage('baseline');
+        setCaptureStatusText(
+          'Parsed 16-Place Civic Auditorium (.glb): auto-labeled 14 seats, 2 wheelchair bays, stage, screen, routes, and 3 movable props.',
+        );
+        setSelectedAttendeeId(
+          report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+            ?.attendeeId ??
+            report.snapshot.roster[0]?.attendeeId ??
+            '',
+        );
+      })();
+      return;
+    }
+
     const nextSnap =
       preset === 'prepared_24'
         ? createPreparedVenueSnapshot()
         : preset === 'bunched_emergency_24'
           ? createBunchedEmergencyVenueSnapshot()
           : createDevFixtureSnapshot();
+    setGlbParseProgress(null);
     setVenuePreset(preset);
     setBaselineSnapshot(nextSnap);
     setBaselineEvaluation(evaluateSceneWithFallback(nextSnap));
@@ -310,12 +385,157 @@ export function App(): React.ReactElement {
     );
   };
 
+  const handleUploadGlbFile = async (file: File): Promise<void> => {
+    if (activeRun && activeRun.state !== 'finished') return;
+    setErrorText(null);
+    try {
+      setGlbParseProgress({
+        stage: 'reading_file',
+        stepIndex: 0,
+        totalSteps: 6,
+        percent: 6,
+        label: 'Reading .glb File from Disk',
+        detail: `Loading ${file.name} (${(file.size / 1024).toFixed(1)} KB)…`,
+      });
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const report = await parseAndLabelGlbVenueAsync(buf, {
+        fileName: file.name,
+        yieldDelayMs: 110,
+        standaloneRandomFour: true,
+        onProgress: (upd) => setGlbParseProgress(upd),
+      });
+      setGlbParseReport(report);
+      setVenuePreset('custom_glb');
+      setBaselineSnapshot(report.snapshot);
+      setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+      setActiveRun(null);
+      setViewingStage('baseline');
+      setCaptureStatusText(
+        `Loaded standalone 3D building "${file.name}": parsed ${report.counts.seats} seats & ${report.counts.wheelchairBays} wheelchair bays, and spawned ${report.snapshot.roster.length} people at random. Use WASD+E/C to fly through or add/remove people in seats!`,
+      );
+      setSelectedAttendeeId(
+        report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+          ?.attendeeId ??
+          report.snapshot.roster[0]?.attendeeId ??
+          '',
+      );
+    } catch (err) {
+      setGlbParseProgress(null);
+      setErrorText(
+        err instanceof Error
+          ? err.message
+          : 'Failed to parse uploaded .glb file.',
+      );
+    }
+  };
+
+  const handleAddAttendee = (
+    placeId: string,
+    requestedProfileId?: ProfileId,
+  ): void => {
+    if (isFrozen) return;
+    const place = baselineSnapshot.places.find((p) => p.id === placeId);
+    if (!place) return;
+    if (baselineSnapshot.roster.some((m) => m.assignedPlaceId === placeId)) {
+      return;
+    }
+
+    const defaultProfile: ProfileId =
+      place.kind === 'wheelchair_bay' ? 'wheelchair_user' : 'reference_adult';
+    const profileId =
+      requestedProfileId &&
+      baselineSnapshot.profiles[requestedProfileId]?.compatiblePlaceKinds.includes(
+        place.kind,
+      )
+        ? requestedProfileId
+        : defaultProfile;
+
+    const existingNums = baselineSnapshot.roster.map((m) => {
+      const match = m.attendeeId.match(/(\d+)$/);
+      return match ? Number(match[1]) : 0;
+    });
+    const nextNum = Math.max(0, ...existingNums) + 1;
+    const prefix =
+      profileId === 'shorter_seated'
+        ? 'att_shorter'
+        : profileId === 'extra_legroom'
+          ? 'att_extra_legroom'
+          : profileId === 'wheelchair_user'
+            ? 'att_wheelchair'
+            : 'att_adult';
+    const attendeeId = `${prefix}_${String(nextNum).padStart(2, '0')}`;
+    const profileLabel =
+      baselineSnapshot.profiles[profileId]?.label ?? profileId;
+
+    const updatedSnap = withUpdatedSceneHash({
+      ...baselineSnapshot,
+      roster: [
+        ...baselineSnapshot.roster,
+        {
+          attendeeId,
+          label: `Guest ${nextNum} (${profileLabel} · ${place.label})`,
+          profileId,
+          assignedPlaceId: place.id,
+        },
+      ],
+    });
+
+    setBaselineSnapshot(updatedSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(updatedSnap));
+    setSelectedAttendeeId(attendeeId);
+    setCaptureStatusText(
+      `Added Guest ${nextNum} (${profileLabel}) to ${place.label}.`,
+    );
+  };
+
+  const handleRemoveAttendee = (attendeeId: string): void => {
+    if (isFrozen) return;
+    const updatedRoster = baselineSnapshot.roster.filter(
+      (m) => m.attendeeId !== attendeeId,
+    );
+    const updatedSnap = withUpdatedSceneHash({
+      ...baselineSnapshot,
+      roster: updatedRoster,
+    });
+    setBaselineSnapshot(updatedSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(updatedSnap));
+    if (selectedAttendeeId === attendeeId) {
+      const nextSelected = updatedRoster[0]?.attendeeId ?? '';
+      setSelectedAttendeeId(nextSelected);
+      if (!nextSelected && viewMode === 'attendee_pov') {
+        setViewMode('overview');
+      }
+    }
+    setCaptureStatusText(
+      `Removed attendee ${attendeeId} (${updatedRoster.length} of ${updatedSnap.places.length} seats occupied).`,
+    );
+  };
+
+  const handleRandomizeFourAttendees = (): void => {
+    if (isFrozen) return;
+    const randomRoster = spawnRandomFourAttendees(baselineSnapshot.places);
+    const updatedSnap = withUpdatedSceneHash({
+      ...baselineSnapshot,
+      roster: randomRoster,
+    });
+    setBaselineSnapshot(updatedSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(updatedSnap));
+    setSelectedAttendeeId(randomRoster[0]?.attendeeId ?? '');
+    setCaptureStatusText(
+      `Spawned ${randomRoster.length} people at random across ${updatedSnap.places.length} parsed seats.`,
+    );
+  };
+
   const handlePreviewLocalRepair = (): void => {
     setErrorText(null);
     const previewRun = createLocalFixtureRepairPreviewRun(baselineSnapshot);
     setActiveRun(previewRun);
     setViewingStage('best');
-    setCaptureStatusText(null);
+    setCaptureStatusText(
+      venuePreset === 'dev_4'
+        ? 'Showing 4-Place Compact Hall Repair Preview (obj_prop_sign_01 shifted; Sam R2-1 visibility 54/135 → 135/135).'
+        : `Showing ${baselineSnapshot.places.length}-Place Reference Repair Preview (all ${baselineSnapshot.places.length} places pass).`,
+    );
   };
 
   const handleResetToBaseline = (): void => {
@@ -342,9 +562,12 @@ export function App(): React.ReactElement {
         captureStatusText={captureStatusText}
         errorText={errorText}
         venuePreset={venuePreset}
+        glbParseReport={glbParseReport}
+        glbParseProgress={glbParseProgress}
         unmetCount={displayedEvaluation.comparison.attendeesWithUnmetRequirements}
         totalSeats={displayedEvaluation.occupiedCount}
         onSelectVenuePreset={handleSelectVenuePreset}
+        onUploadGlbFile={(file) => void handleUploadGlbFile(file)}
         onStartLiveRun={() => void handleStartLiveRun()}
         onPreviewLocalRepair={handlePreviewLocalRepair}
         onResetToBaseline={handleResetToBaseline}
@@ -360,6 +583,9 @@ export function App(): React.ReactElement {
           void handleChangePlaceAssignment(attId, placeId)
         }
         onOpenProfileEditor={() => setIsProfileModalOpen(true)}
+        onAddAttendee={handleAddAttendee}
+        onRemoveAttendee={handleRemoveAttendee}
+        onRandomizeFourAttendees={handleRandomizeFourAttendees}
       />
 
       <main
@@ -383,6 +609,10 @@ export function App(): React.ReactElement {
           onToggleSightlineOverlays={() =>
             setShowSightlineOverlays((prev) => !prev)
           }
+          onAddAttendeeAtPlace={
+            !isFrozen ? (placeId) => handleAddAttendee(placeId) : undefined
+          }
+          onRemoveAttendee={!isFrozen ? handleRemoveAttendee : undefined}
         />
       </main>
 

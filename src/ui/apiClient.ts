@@ -11,7 +11,10 @@ import {
   type SceneSnapshot,
   type UploadEvidenceResponse,
 } from '../shared/index.js';
-import { applyAndValidatePatch } from '../evaluation/index.js';
+import {
+  applyAndValidatePatch,
+  compareEvaluations,
+} from '../evaluation/index.js';
 import {
   PREPARED_VENUE_SCENE_ID,
   createBunchedEmergencyReferencePatch,
@@ -126,13 +129,18 @@ export function createLocalFixtureRepairPreviewRun(
   const baselineEvaluation = evaluateSceneWithFallback(baselineSnapshot);
   const nowIso = new Date().toISOString();
 
+  const hasPreparedProps = baselineSnapshot.objects.some(
+    (o) => o.id === 'obj_prop_welcome_sign',
+  );
+
   if (
     baselineSnapshot.sceneId === PREPARED_VENUE_SCENE_ID ||
-    baselineSnapshot.sceneId === 'scene_community_hall_24_bunched'
+    baselineSnapshot.sceneId === 'scene_community_hall_24_bunched' ||
+    hasPreparedProps
   ) {
     const isBunched =
       baselineSnapshot.sceneId === 'scene_community_hall_24_bunched';
-    const patch = isBunched
+    const rawPatch = isBunched
       ? createBunchedEmergencyReferencePatch(
           'preview_dev_fixture',
           baselineSnapshot.sceneHash,
@@ -141,6 +149,18 @@ export function createLocalFixtureRepairPreviewRun(
           'preview_dev_fixture',
           baselineSnapshot.sceneHash,
         );
+    const validObjectIds = new Set(baselineSnapshot.objects.map((o) => o.id));
+    const validGroupIds = new Set(
+      baselineSnapshot.chairGroups.map((g) => g.id),
+    );
+    const patch: LayoutPatch = {
+      ...rawPatch,
+      operations: rawPatch.operations.filter((op) =>
+        op.targetType === 'group'
+          ? validGroupIds.has(op.targetId)
+          : validObjectIds.has(op.targetId),
+      ),
+    };
     const validated = applyAndValidatePatch(
       baselineSnapshot,
       baselineSnapshot,
@@ -150,14 +170,14 @@ export function createLocalFixtureRepairPreviewRun(
       ? withUpdatedSceneHash(validated.snapshot)
       : baselineSnapshot;
     const bestEvaluation = evaluateSceneWithFallback(bestSnapshot);
+    const placeCount = bestSnapshot.places.length;
 
     return {
       contractVersion: CONTRACT_VERSION,
       runId: 'preview_dev_fixture',
       state: 'finished',
       outcome: 'improved',
-      terminalReason:
-        'Local 24-Place Reference Repair Preview (use "Review and Improve" for live Gemini 4 Argon run).',
+      terminalReason: `Local ${placeCount}-Place Reference Repair Preview (use "Review and Improve" for live Gemini 4 Argon run).`,
       createdAtIso: nowIso,
       updatedAtIso: nowIso,
       deadlineIso: nowIso,
@@ -178,7 +198,7 @@ export function createLocalFixtureRepairPreviewRun(
         },
       ],
       finalInspection: {
-        captureId: 'cap_preview_revision_24',
+        captureId: `cap_preview_revision_${placeCount}`,
         sceneHash: bestSnapshot.sceneHash,
         findings: isBunched
           ? [
@@ -227,10 +247,123 @@ export function createLocalFixtureRepairPreviewRun(
                   'Shifting obj_prop_av_cart 0.60m east cleared Wheelchair Bay W2 turning circle (1.55m diameter unobstructed).',
               },
             ],
-        remainingIssuesSummary:
-          'All 24 audience places now satisfy sightline, route, footprint, front-legroom, wheelchair turning-space, and emergency evacuation requirements.',
+        remainingIssuesSummary: `All ${placeCount} audience places now satisfy sightline, route, footprint, front-legroom, wheelchair turning-space, and emergency evacuation requirements.`,
       },
       providerModel: 'local-reference-preview (no paid model call)',
+      providerRequestIds: [],
+    };
+  }
+
+  const hasDevSign = baselineSnapshot.objects.some(
+    (o) => o.id === 'obj_prop_sign_01',
+  );
+
+  // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues
+  if (!hasDevSign) {
+    const candidateDeltas: Array<[number, 0, number]> = [
+      [-0.55, 0, 0],
+      [0.55, 0, 0],
+      [0, 0, -0.55],
+      [0, 0, 0.55],
+      [-0.55, 0, -0.55],
+      [0.55, 0, 0.55],
+    ];
+    const editableProps = baselineSnapshot.objects
+      .filter((o) => o.editable && o.category === 'movable_prop')
+      .slice(0, 6);
+
+    const ops: LayoutPatch['operations'] = [];
+    let currentSnap = baselineSnapshot;
+    let currentEval = baselineEvaluation;
+
+    for (const prop of editableProps) {
+      for (const delta of candidateDeltas) {
+        const trialPatch: LayoutPatch = {
+          contractVersion: CONTRACT_VERSION,
+          runId: 'preview_custom_glb',
+          parentSceneHash: currentSnap.sceneHash,
+          diagnosis: [],
+          operations: [
+            {
+              targetType: 'object',
+              targetId: prop.id,
+              deltaPositionM: delta,
+              deltaYawDeg: 0,
+              reason: `Relocate ${prop.id} by [${delta.join(', ')}]m to improve sightline or access clearance.`,
+            },
+          ],
+          summary: `Auto-repaired ${prop.id}.`,
+        };
+        const val = applyAndValidatePatch(baselineSnapshot, currentSnap, trialPatch);
+        if (val.valid && val.snapshot) {
+          const nextEval = evaluateSceneWithFallback(val.snapshot);
+          const cmp = compareEvaluations(currentEval, nextEval);
+          if (cmp.accepted) {
+            ops.push(trialPatch.operations[0]!);
+            currentSnap = val.snapshot;
+            currentEval = nextEval;
+            break;
+          }
+        }
+      }
+    }
+
+    const combinedPatch: LayoutPatch = {
+      contractVersion: CONTRACT_VERSION,
+      runId: 'preview_custom_glb',
+      parentSceneHash: baselineSnapshot.sceneHash,
+      diagnosis: [
+        {
+          viewId: 'view_overview_room',
+          timestampSec: 1.0,
+          observation: `Evaluated ${editableProps.length} movable props in uploaded .glb venue.`,
+        },
+      ],
+      operations: ops,
+      summary:
+        ops.length > 0
+          ? `Applied ${ops.length} bounded prop adjustment(s) on uploaded .glb venue.`
+          : 'No movable prop adjustments improved the uploaded .glb venue.',
+    };
+
+    return {
+      contractVersion: CONTRACT_VERSION,
+      runId: 'preview_custom_glb',
+      state: 'finished',
+      outcome: ops.length > 0 ? 'improved' : 'no_improvement',
+      terminalReason: 'Local Uploaded .glb Repair Preview.',
+      createdAtIso: nowIso,
+      updatedAtIso: nowIso,
+      deadlineIso: nowIso,
+      elapsedMs: 0,
+      baselineSnapshot,
+      baselineEvaluation,
+      bestSnapshot: currentSnap,
+      bestEvaluation: currentEval,
+      attempts: [
+        {
+          attemptIndex: 0,
+          patch: combinedPatch,
+          candidateSceneHash: currentSnap.sceneHash,
+          evaluation: currentEval,
+          comparisonOutcome: ops.length > 0 ? 'accepted' : 'rejected_no_improvement',
+          rejectionReasons: [],
+          timestampIso: nowIso,
+        },
+      ],
+      finalInspection: {
+        captureId: 'cap_preview_custom_glb',
+        sceneHash: currentSnap.sceneHash,
+        findings: [
+          {
+            viewId: 'view_overview_room',
+            timestampSec: 1.0,
+            observation: combinedPatch.summary,
+          },
+        ],
+        remainingIssuesSummary: `Unmet requirements: ${currentEval.comparison.attendeesWithUnmetRequirements} (${currentEval.comparison.totalFailedRequirementChecks} failed checks).`,
+      },
+      providerModel: 'local-glb-repair-solver (no paid model call)',
       providerRequestIds: [],
     };
   }

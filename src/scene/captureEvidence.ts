@@ -301,10 +301,11 @@ async function recordBrowserCanvasClip(params: {
   let builtScene: ReturnType<typeof buildVenueThreeScene> | null = null;
 
   try {
+    const probeCanvas = document.createElement('canvas');
     const canInitWebgl =
       typeof webglCanvas.addEventListener === 'function' &&
       Boolean(
-        webglCanvas.getContext('webgl2') || webglCanvas.getContext('webgl'),
+        probeCanvas.getContext('webgl2') || probeCanvas.getContext('webgl'),
       );
     if (canInitWebgl) {
       try {

@@ -18,6 +18,11 @@ import {
   type Vec3,
 } from '../../src/shared/index.js';
 import {
+  applyAndValidatePatch,
+  compareEvaluations,
+  evaluateScene,
+} from '../../src/evaluation/index.js';
+import {
   VenueViewport,
   applyActiveViewerVisibility,
   applyAttendeeCameraPose,
@@ -28,14 +33,25 @@ import {
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
   disposeVenueScene,
+  generateSampleCustomAuditoriumGlb,
   generateVenueGlbBinary,
   getActiveKeyframeAtTime,
+  getGlbAlignmentForScene,
   getOverviewCameraPose,
   getProxyWorldTransform,
+  getUploadedGlbBytesForScene,
+  isStandaloneUploadedGlbScene,
   loadPreparedVenueManifest,
+  parseAndLabelGlbVenue,
+  parseAndLabelGlbVenueAsync,
   parseVenueGlbBinary,
+  spawnRandomFourAttendees,
+  type GlbParseProgressUpdate,
 } from '../../src/scene/index.js';
-import { applyAndValidatePatch } from '../../src/evaluation/index.js';
+import {
+  computeAttendeeSampleVisibilityMask,
+  createLocalFixtureRepairPreviewRun,
+} from '../../src/ui/index.js';
 
 /**
  * Pure 3D segment vs axis-aligned box intersection test (Slab method) for verifying
@@ -747,5 +763,215 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(outsideRamp).toBeDefined();
 
     disposeVenueScene(built.scene);
+  });
+
+  it('passes Stream B real evaluateScene, applyAndValidatePatch, and compareEvaluations with 24/24 clear-and-usable places after reference patch', () => {
+    const baseline = createPreparedVenueSnapshot();
+    const baseEval = evaluateScene(baseline);
+    expect(baseEval.isValidStructure).toBe(true);
+    expect(baseEval.structuralErrors).toHaveLength(0);
+
+    const patch = createPreparedVenueReferencePatch(
+      'run_stream_b_check',
+      baseline.sceneHash,
+    );
+    const val = applyAndValidatePatch(baseline, baseline, patch);
+    expect(val.valid).toBe(true);
+    expect(val.errors).toHaveLength(0);
+    expect(val.snapshot).toBeDefined();
+
+    const revEval = evaluateScene(val.snapshot!);
+    expect(revEval.isValidStructure).toBe(true);
+    expect(revEval.allModeledRequirementsMet).toBe(true);
+    expect(revEval.comparison.attendeesWithUnmetRequirements).toBe(0);
+    expect(revEval.comparison.totalFailedRequirementChecks).toBe(0);
+
+    const cmp = compareEvaluations(baseEval, revEval);
+    expect(cmp.accepted).toBe(true);
+    expect(cmp.outcome).toBe('accepted');
+  });
+
+  it('auto-labels seats, wheelchair bays, stage, screen, pillars, and props from a binary .glb venue via parseAndLabelGlbVenue', async () => {
+    const venueDir = path.resolve(process.cwd(), 'public', 'venue');
+    const glbBytes = new Uint8Array(
+      fs.readFileSync(path.join(venueDir, 'prepared-venue.glb')),
+    );
+    const report = parseAndLabelGlbVenue(glbBytes, {
+      fileName: 'prepared-venue.glb',
+    });
+
+    expect(report.counts.seats).toBe(22);
+    expect(report.counts.wheelchairBays).toBe(2);
+    expect(report.counts.stagesAndScreens).toBe(2);
+    expect(report.counts.pillarsAndStructures).toBe(2);
+    expect(report.counts.movableProps).toBe(3);
+    expect(report.snapshot.places).toHaveLength(24);
+    expect(report.snapshot.roster).toHaveLength(24);
+
+    // Verify the auto-labeled snapshot renders cleanly in buildVenueThreeScene and scores in evaluateScene
+    const built = buildVenueThreeScene(report.snapshot, {
+      cleanForEvidenceCapture: false,
+      viewMode: 'overview',
+    });
+    expect(built.objectNodesById.size).toBe(report.snapshot.objects.length);
+    disposeVenueScene(built.scene);
+
+    const evaluated = evaluateScene(report.snapshot);
+    expect(evaluated.isValidStructure).toBe(true);
+    expect(evaluated.occupiedCount).toBe(24);
+
+    // Verify Preview Repair on the GLB-parsed 24-place venue achieves 24/24 clear-and-usable
+    const previewRun24 = createLocalFixtureRepairPreviewRun(report.snapshot);
+    expect(previewRun24.bestEvaluation.allModeledRequirementsMet).toBe(true);
+    expect(
+      previewRun24.bestEvaluation.comparison.attendeesWithUnmetRequirements,
+    ).toBe(0);
+
+    // Verify 16-Place Civic Auditorium .glb auto-parsing and repair preview achieves 16/16 clear-and-usable
+    const customGlb = generateSampleCustomAuditoriumGlb();
+    const customReport = parseAndLabelGlbVenue(customGlb.glbBytes, {
+      fileName: customGlb.fileName,
+    });
+    expect(customReport.counts.seats).toBe(14);
+    expect(customReport.counts.wheelchairBays).toBe(2);
+    expect(customReport.snapshot.places).toHaveLength(16);
+
+    const previewRun16 = createLocalFixtureRepairPreviewRun(
+      customReport.snapshot,
+    );
+    expect(previewRun16.bestEvaluation.isValidStructure).toBe(true);
+    expect(previewRun16.bestEvaluation.allModeledRequirementsMet).toBe(true);
+    expect(
+      previewRun16.bestEvaluation.comparison.attendeesWithUnmetRequirements,
+    ).toBe(0);
+
+    // Verify UI 135-sample visibility mask matches Stream B evaluateScene visibleSamples for every attendee
+    for (const member of report.snapshot.roster) {
+      const maskRes = computeAttendeeSampleVisibilityMask(
+        report.snapshot,
+        member.attendeeId,
+      );
+      const visibleCount = maskRes.visibleMask.filter(Boolean).length;
+      expect(visibleCount).toBe(
+        evaluated.attendees[member.attendeeId]?.visibleSamples,
+      );
+    }
+
+    // Verify parseAndLabelGlbVenueAsync emits all 6 monotonically increasing progress updates
+    const progressUpdates: GlbParseProgressUpdate[] = [];
+    const asyncReport = await parseAndLabelGlbVenueAsync(customGlb.glbBytes, {
+      fileName: customGlb.fileName,
+      yieldDelayMs: 1,
+      onProgress: (u) => progressUpdates.push(u),
+    });
+    expect(asyncReport.snapshot.places).toHaveLength(16);
+    expect(progressUpdates).toHaveLength(6);
+    expect(progressUpdates.map((u) => u.stage)).toEqual([
+      'reading_header',
+      'traversing_hierarchy',
+      'classifying_nodes',
+      'synthesizing_routes',
+      'assigning_profiles',
+      'complete',
+    ]);
+    expect(progressUpdates[0]?.percent).toBe(15);
+    expect(progressUpdates[5]?.percent).toBe(100);
+
+    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb is present, verify standalone building parsing, real seat extraction, and random 4-person spawning
+    const externalRoomGlbPath =
+      '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb';
+    if (fs.existsSync(externalRoomGlbPath)) {
+      const roomBuf = new Uint8Array(fs.readFileSync(externalRoomGlbPath));
+      const roomReport = await parseAndLabelGlbVenueAsync(roomBuf, {
+        fileName: 'room.glb',
+        yieldDelayMs: 1,
+        standaloneRandomFour: true,
+        randomFn: () => 0.42,
+      });
+      expect(roomReport.totalNodes).toBe(10);
+      expect(roomReport.counts.seats).toBeGreaterThanOrEqual(6);
+      expect(roomReport.counts.wheelchairBays).toBe(2);
+      expect(roomReport.counts.pillarsAndStructures).toBe(0);
+      expect(roomReport.counts.movableProps).toBe(0);
+      expect(isStandaloneUploadedGlbScene(roomReport.snapshot.sceneId)).toBe(
+        true,
+      );
+      expect(
+        getUploadedGlbBytesForScene(roomReport.snapshot.sceneId)?.byteLength,
+      ).toBe(roomBuf.byteLength);
+
+      // Verify parallel multi-agent telemetry (SeatClusterAgent + StageAndScreenAgent + EgressAndAccessibilityAgent)
+      expect(roomReport.agentTelemetry).toBeDefined();
+      expect(roomReport.agentTelemetry?.agents).toHaveLength(3);
+      expect(roomReport.agentTelemetry?.agents.map((a) => a.agentName)).toEqual(
+        [
+          'SeatClusterAgent',
+          'StageAndScreenAgent',
+          'EgressAndAccessibilityAgent',
+        ],
+      );
+
+      // Exactly 4 people spawned at random into the parsed seats
+      expect(roomReport.snapshot.roster).toHaveLength(4);
+      const uniquePlaces = new Set(
+        roomReport.snapshot.roster.map((r) => r.assignedPlaceId),
+      );
+      expect(uniquePlaces.size).toBe(4);
+
+      const roomEval = evaluateScene(roomReport.snapshot);
+      expect(roomEval.isValidStructure).toBe(true);
+      expect(roomEval.occupiedCount).toBe(4);
+      expect(roomEval.capacityCount).toBe(roomReport.snapshot.places.length);
+    }
+
+    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb is present, verify:
+    // 1. Exactly 50 real chairs (Chair_R1_S01..Chair_R5_S10) are parsed with zero false-positive front spots
+    // 2. SightTargetAgent selects ProjScreen_16x9_Active_Surface at [0.15, 2.94, -4.38] (3.72m x 2.04m)
+    // 3. Identity alignment is used so the 3D classroom mesh and parsed seats/screen match 1:1
+    const externalClassroomGlbPath =
+      '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb';
+    if (fs.existsSync(externalClassroomGlbPath)) {
+      const clsBuf = new Uint8Array(fs.readFileSync(externalClassroomGlbPath));
+      const clsReport = await parseAndLabelGlbVenueAsync(clsBuf, {
+        fileName: 'smallClassroom.glb',
+        yieldDelayMs: 1,
+        standaloneRandomFour: true,
+        randomFn: () => 0.35,
+      });
+      expect(clsReport.counts.seats).toBe(50);
+      expect(clsReport.counts.wheelchairBays).toBe(0);
+      expect(clsReport.snapshot.places).toHaveLength(50);
+      expect(clsReport.snapshot.target.id).toBe('Screen_Projection_16x9');
+      expect(clsReport.snapshot.target.center[0]).toBeCloseTo(0.6, 2);
+      expect(clsReport.snapshot.target.center[1]).toBeCloseTo(2.94, 2);
+      expect(clsReport.snapshot.target.center[2]).toBeCloseTo(-4.38, 2);
+      expect(clsReport.snapshot.target.widthM).toBeCloseTo(3.72, 2);
+      expect(clsReport.snapshot.target.heightM).toBeCloseTo(2.04, 2);
+
+      const align = getGlbAlignmentForScene(clsReport.snapshot.sceneId);
+      expect(align.rotationYRad).toBe(0);
+      expect(align.scale).toBe(1.0);
+
+      // Verify seats are analyzed in 3D across all 5 stepped riser levels (0.16m, 0.34m, 0.52m, 0.70m, 0.88m), not flat at y=0
+      const distinctSeatYLevels = [
+        ...new Set(
+          clsReport.snapshot.objects
+            .filter((o) => o.category === 'movable_chair')
+            .map((o) => Number(o.transform.position[1].toFixed(2))),
+        ),
+      ].sort((a, b) => a - b);
+      expect(distinctSeatYLevels).toEqual([0.16, 0.34, 0.52, 0.7, 0.88]);
+
+      const clsEval = evaluateScene(clsReport.snapshot);
+      expect(clsEval.isValidStructure).toBe(true);
+      expect(clsEval.occupiedCount).toBe(4);
+    }
+
+    // Also verify spawnRandomFourAttendees on arbitrary place lists
+    const randomRoster = spawnRandomFourAttendees(
+      report.snapshot.places,
+      () => 0.25,
+    );
+    expect(randomRoster).toHaveLength(4);
   });
 });

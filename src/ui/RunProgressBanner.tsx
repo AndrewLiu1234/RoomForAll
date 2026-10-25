@@ -5,6 +5,17 @@ import {
   type RunRecord,
   type RunState,
 } from '../shared/index.js';
+import type {
+  GlbParseProgressUpdate,
+  GlbVenueParseReport,
+} from '../scene/index.js';
+
+export type VenuePresetMode =
+  | 'prepared_24'
+  | 'bunched_emergency_24'
+  | 'dev_4'
+  | 'classroom_50'
+  | 'custom_glb';
 
 export interface ActiveCaptureProgress {
   phase: 'baseline' | 'revision';
@@ -21,18 +32,19 @@ export interface RunProgressBannerProps {
   isCapturingClip: boolean;
   captureStatusText: string | null;
   errorText: string | null;
-  venuePreset?: 'prepared_24' | 'bunched_emergency_24' | 'dev_4';
+  venuePreset?: VenuePresetMode;
+  glbParseReport?: GlbVenueParseReport | null;
+  glbParseProgress?: GlbParseProgressUpdate | null;
   unmetCount?: number;
   totalSeats?: number;
-  onSelectVenuePreset?: (
-    preset: 'prepared_24' | 'bunched_emergency_24' | 'dev_4',
-  ) => void;
+  onSelectVenuePreset?: (preset: VenuePresetMode) => void;
+  onUploadGlbFile?: (file: File) => void;
   onStartLiveRun: () => void;
   onPreviewLocalRepair: () => void;
   onResetToBaseline: () => void;
   activeCaptureProgress?: ActiveCaptureProgress | null;
   selectedAttendeeId?: string;
-  activeViewMode?: 'overview' | 'attendee_pov';
+  activeViewMode?: 'overview' | 'attendee_pov' | 'flythrough';
 }
 
 const ORDERED_STATES: Array<{ state: RunState; label: string }> = [
@@ -52,15 +64,22 @@ export function RunProgressBanner({
   captureStatusText,
   errorText,
   venuePreset = 'prepared_24',
+  glbParseReport,
+  glbParseProgress,
   unmetCount = 0,
   totalSeats = 24,
   onSelectVenuePreset,
+  onUploadGlbFile,
   onStartLiveRun,
   onPreviewLocalRepair,
   onResetToBaseline,
   activeCaptureProgress,
 }: RunProgressBannerProps): React.ReactElement {
   const isRunning = activeRun !== null && activeRun.state !== 'finished';
+  const isParsingGlb =
+    glbParseProgress !== null &&
+    glbParseProgress !== undefined &&
+    glbParseProgress.stage !== 'complete';
   const currentIdx = activeRun
     ? ORDERED_STATES.findIndex((s) => s.state === activeRun.state)
     : -1;
@@ -132,6 +151,17 @@ export function RunProgressBanner({
             <button
               type="button"
               className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'classroom_50' ? 'vp-segment-btn-active' : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('classroom_50')}
+              title="Load 50-Seat Tiered Classroom (smallClassroom.glb) with 5 curved tiers, Screen_Projection_16x9 target, and 4 random people"
+            >
+              Classroom · 50 (.glb)
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
                 venuePreset === 'dev_4' ? 'vp-segment-btn-active' : ''
               }`}
               disabled={isRunning || isCapturingClip}
@@ -140,6 +170,34 @@ export function RunProgressBanner({
               Compact Hall · 4
             </button>
           </div>
+        )}
+
+        {onUploadGlbFile && (
+          <label
+            className="vp-btn vp-focusable"
+            style={{
+              padding: '4px 10px',
+              fontSize: '0.73rem',
+              cursor: isRunning || isCapturingClip ? 'not-allowed' : 'pointer',
+              opacity: isRunning || isCapturingClip ? 0.5 : 1,
+            }}
+            title="Upload any binary glTF 2.0 (.glb) 3D building to create a standalone scene, auto-detect 3D chairs & Sight Target via Parallel Gemini Agents, and spawn 4 random people"
+          >
+            Upload .glb
+            <input
+              type="file"
+              accept=".glb,model/gltf-binary"
+              disabled={isRunning || isCapturingClip}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  onUploadGlbFile(file);
+                  e.target.value = '';
+                }
+              }}
+            />
+          </label>
         )}
       </div>
 
@@ -166,6 +224,22 @@ export function RunProgressBanner({
           >
             <span className="vp-status-dot vp-status-dot-fail" />
             <span>{errorText}</span>
+          </div>
+        ) : isParsingGlb && glbParseProgress ? (
+          <div
+            className="vp-badge vp-badge-neutral"
+            style={{
+              padding: '4px 12px',
+              fontSize: '0.74rem',
+              background: 'rgba(139, 92, 246, 0.16)',
+              borderColor: 'rgba(167, 139, 250, 0.45)',
+              color: '#e9d5ff',
+            }}
+          >
+            <span className="vp-live-dot" />
+            <span>
+              {glbParseProgress.label} ({glbParseProgress.percent}%)
+            </span>
           </div>
         ) : isRunning || isCapturingClip ? (
           <div
@@ -225,6 +299,29 @@ export function RunProgressBanner({
                         ? 'Baseline Retained'
                         : activeRun.outcome.replace(/_/g, ' ')
                   }`}
+            </span>
+          </div>
+        ) : glbParseReport &&
+          (venuePreset === 'custom_glb' || venuePreset === 'classroom_50') ? (
+          <div
+            className="vp-badge vp-badge-neutral"
+            style={{
+              padding: '4px 12px',
+              fontSize: '0.73rem',
+              background: 'rgba(56, 189, 248, 0.12)',
+              borderColor: 'rgba(56, 189, 248, 0.35)',
+              color: '#bae6fd',
+            }}
+            title={
+              glbParseReport.agentTelemetry?.agents
+                .map((a) => `${a.agentName} (${a.latencyMs}ms): ${a.summary}`)
+                .join(' | ') ?? undefined
+            }
+          >
+            <span>
+              ⚡ 3 Parallel GLB Agents ({glbParseReport.counts.seats} 3D chairs ·
+              Target: {glbParseReport.snapshot.target.id} ·{' '}
+              {glbParseReport.snapshot.roster.length} spawned)
             </span>
           </div>
         ) : (
@@ -309,14 +406,19 @@ export function RunProgressBanner({
         </button>
       </div>
 
-      {/* Sleek Bottom Edge Progress Track during Active Run */}
-      {(isRunning || isCapturingClip) && (
+      {/* Sleek Bottom Edge Progress Track during Active Run or GLB Parsing */}
+      {(isRunning || isCapturingClip || isParsingGlb) && (
         <div className="vp-header-progress-track" aria-hidden="true">
           <div
             className="vp-header-progress-fill"
             style={{
               width: '100%',
-              transform: `scaleX(${Math.max(0.08, progressFraction)})`,
+              transform: `scaleX(${Math.max(
+                0.08,
+                isParsingGlb && glbParseProgress
+                  ? glbParseProgress.percent / 100
+                  : progressFraction,
+              )})`,
             }}
           />
         </div>
