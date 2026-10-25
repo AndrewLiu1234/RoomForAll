@@ -18,6 +18,11 @@ import {
   type Vec3,
 } from '../../src/shared/index.js';
 import {
+  applyAndValidatePatch,
+  compareEvaluations,
+  evaluateScene,
+} from '../../src/evaluation/index.js';
+import {
   VenueViewport,
   applyActiveViewerVisibility,
   applyAttendeeCameraPose,
@@ -717,5 +722,31 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     );
     expect(manifest.keyframes[0]?.fovDeg).toBe(90);
     expect(manifest.keyframes[0]?.aspect).toBe(1.0);
+  });
+
+  it('passes Stream B real evaluateScene, applyAndValidatePatch, and compareEvaluations with 24/24 clear-and-usable places after reference patch', () => {
+    const baseline = createPreparedVenueSnapshot();
+    const baseEval = evaluateScene(baseline);
+    expect(baseEval.isValidStructure).toBe(true);
+    expect(baseEval.structuralErrors).toHaveLength(0);
+
+    const patch = createPreparedVenueReferencePatch(
+      'run_stream_b_check',
+      baseline.sceneHash,
+    );
+    const val = applyAndValidatePatch(baseline, baseline, patch);
+    expect(val.valid).toBe(true);
+    expect(val.errors).toHaveLength(0);
+    expect(val.snapshot).toBeDefined();
+
+    const revEval = evaluateScene(val.snapshot!);
+    expect(revEval.isValidStructure).toBe(true);
+    expect(revEval.allModeledRequirementsMet).toBe(true);
+    expect(revEval.comparison.attendeesWithUnmetRequirements).toBe(0);
+    expect(revEval.comparison.totalFailedRequirementChecks).toBe(0);
+
+    const cmp = compareEvaluations(baseEval, revEval);
+    expect(cmp.accepted).toBe(true);
+    expect(cmp.outcome).toBe('accepted');
   });
 });

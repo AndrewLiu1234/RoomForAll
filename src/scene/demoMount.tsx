@@ -16,6 +16,7 @@ import {
   type CapturedEvidencePayload,
   type SceneSnapshot,
 } from '../shared/index.js';
+import { evaluateScene } from '../evaluation/index.js';
 import {
   VenueViewport,
   buildDefaultCaptureKeyframes,
@@ -142,6 +143,11 @@ export function PartADemoApp(): React.ReactElement {
 
   const activeSnapshot =
     scenePhase === 'patched' ? patchedSnapshot : baselineSnapshot;
+  const activeEval = useMemo(
+    () => evaluateScene(activeSnapshot),
+    [activeSnapshot],
+  );
+  const selectedAttendeeEval = activeEval.attendees[selectedAttendeeId];
 
   const highlightedObjectIds = useMemo(
     () =>
@@ -610,6 +616,51 @@ export function PartADemoApp(): React.ReactElement {
             highlightedObjectIds={highlightedObjectIds}
             overviewPreset={overviewPreset}
           />
+        </div>
+
+        {/* Live Evaluator Scorecard Strip */}
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: '8px',
+            background: '#0f172a',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '0.78rem',
+          }}
+        >
+          <div>
+            <strong>Room Score ({scenePhase}):</strong>{' '}
+            <span
+              style={{
+                color: activeEval.allModeledRequirementsMet
+                  ? '#34d399'
+                  : '#fbbf24',
+                fontWeight: 600,
+              }}
+            >
+              {24 - activeEval.comparison.attendeesWithUnmetRequirements} / 24
+              Clear &amp; Usable
+            </span>{' '}
+            · Failed Checks: {activeEval.comparison.totalFailedRequirementChecks}
+          </div>
+          {selectedAttendeeEval && (
+            <div>
+              <strong>Selected ({selectedAttendeeId}):</strong> Sightline{' '}
+              <code>
+                {selectedAttendeeEval.visibleSamples}/
+                {selectedAttendeeEval.totalSamples}
+              </code>{' '}
+              · Route: <code>{selectedAttendeeEval.routeStatus}</code> · Legroom:{' '}
+              <code>{selectedAttendeeEval.legroomPass ? 'PASS' : 'FAIL'}</code> ·
+              Turning:{' '}
+              <code>
+                {selectedAttendeeEval.turningSpacePass ? 'PASS' : 'FAIL'}
+              </code>
+            </div>
+          )}
         </div>
       </main>
 
