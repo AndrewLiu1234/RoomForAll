@@ -114,10 +114,11 @@ export function populateThreeSceneFromSnapshot(
     // Also render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
     const target = snapshot.target;
     const targetOutlineGroup = new THREE.Group();
+    const zOffset = target.yawDeg === 0 ? -0.015 : 0.015;
     targetOutlineGroup.position.set(
       target.center[0],
       target.center[1],
-      target.center[2] + 0.015,
+      target.center[2] + zOffset,
     );
     targetOutlineGroup.rotation.y = target.yawDeg * DEG_TO_RAD;
     const planeGeo = new THREE.PlaneGeometry(target.widthM, target.heightM);
@@ -130,13 +131,14 @@ export function populateThreeSceneFromSnapshot(
     targetOutlineGroup.add(new THREE.LineSegments(edgesGeo, edgesMat));
     scene.add(targetOutlineGroup);
 
-    // Render 3D Exit Point Markers at each parsed exit location (`snapshot.exits`) where people navigate to and disappear!
+    // Render 3D Exit Point Markers at each parsed or repaired exit location (`snapshot.exits`) where people navigate to and disappear!
     const exitPortals = snapshot.exits ?? [];
     for (const exit of exitPortals) {
       const [ex, ez] = exit.position;
+      const ey = (exit.elevationM ?? 0) + 0.03;
       const exitPointGroup = new THREE.Group();
       exitPointGroup.name = `exit_point_marker_${exit.id}`;
-      exitPointGroup.position.set(ex, 0.03, ez);
+      exitPointGroup.position.set(ex, ey, ez);
 
       const outerRingGeo = new THREE.RingGeometry(0.34, 0.44, 32);
       const outerRingMat = new THREE.MeshBasicMaterial({

@@ -68,7 +68,12 @@ export function VenueViewportStage({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const renderFrameRef = useRef<(() => void) | null>(null);
   const attendeeProxyNodesRef = useRef<Map<string, THREE.Object3D>>(new Map());
-  const defaultDistance = snapshot.places.length > 8 ? 10.6 : 7.2;
+  const defaultDistance =
+    snapshot.places.length > 100
+      ? 24.0
+      : snapshot.places.length > 8
+        ? 10.6
+        : 7.2;
 
   const [selectedEmptyPlaceId, setSelectedEmptyPlaceId] = useState<
     string | null
@@ -162,7 +167,12 @@ export function VenueViewportStage({
     setOrbitAngles({
       azimuthRad: 0.38,
       polarRad: 0.92,
-      distanceM: snapshot.places.length > 8 ? 10.6 : 7.2,
+      distanceM:
+        snapshot.places.length > 100
+          ? 24.0
+          : snapshot.places.length > 8
+            ? 10.6
+            : 7.2,
     });
     setSelectedEmptyPlaceId(null);
     flyPoseRef.current = {
@@ -1229,10 +1239,11 @@ export function VenueViewportStage({
                 evacSimResult.evacuationPass ? 'vp-badge-pass' : 'vp-badge-fail'
               }`}
               style={{ fontSize: '0.72rem' }}
+              title={evacSimResult.evacuationImpossibleReason}
             >
-              Exits Open: {evacSimResult.activeExitCount}/
-              {evacSimResult.totalExitCount} · T_evac{' '}
-              {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
+              {(evacSimResult.trappedCount ?? 0) > 0
+                ? `⚠️ Exit Impossible: ${evacSimResult.trappedCount}/${snapshot.roster.length} Blocked by Walls — Run Repair to Add Exits`
+                : `Exits Open: ${evacSimResult.activeExitCount}/${evacSimResult.totalExitCount} · T_evac ${evacSimResult.totalEvacuationTimeSec.toFixed(1)}s`}
             </span>
 
             <div className="vp-divider-v" />
@@ -1552,7 +1563,7 @@ export function VenueViewportStage({
               ...prev,
               distanceM: Math.max(
                 3.2,
-                Math.min(24.0, prev.distanceM + e.deltaY * 0.006),
+                Math.min(60.0, prev.distanceM + e.deltaY * 0.008),
               ),
             }));
           } else if (viewMode === 'flythrough') {

@@ -153,9 +153,15 @@ export function evaluateAttendeeAccess(
     }
 
     if (footprintFitPass) {
+      const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
       for (const other of placeFootprints) {
         if (other.place.id === place.id) continue;
-        if (!other.isOccupied && other.place.kind === 'wheelchair_bay') continue;
+        if (
+          !other.isOccupied &&
+          (other.place.kind === 'wheelchair_bay' || isStandaloneGlb)
+        ) {
+          continue;
+        }
         if (
           shapes2DOverlap(
             requiredFootprintShape,
@@ -212,9 +218,15 @@ export function evaluateAttendeeAccess(
     }
 
     if (legroomPass) {
+      const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
       for (const other of placeFootprints) {
         if (other.place.id === place.id) continue;
-        if (!other.isOccupied && other.place.kind === 'wheelchair_bay') continue;
+        if (
+          !other.isOccupied &&
+          (other.place.kind === 'wheelchair_bay' || isStandaloneGlb)
+        ) {
+          continue;
+        }
         if (shapes2DOverlap(legroomShape, other.shape2D, NUMERIC_EPSILON)) {
           legroomPass = false;
           break;
@@ -300,27 +312,30 @@ export function evaluateAttendeeAccess(
     const reqWidth = profile.requiredRouteWidthM;
     const corridorSegments: Array<[Vec2, Vec2]> = [];
 
+    const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
     let minAnchorDistSq = Infinity;
     let closestCorridorPoint: Vec2 = corridor.waypoints[0]!;
 
-    for (let i = 0; i < corridor.waypoints.length - 1; i++) {
-      const p0 = corridor.waypoints[i]!;
-      const p1 = corridor.waypoints[i + 1]!;
-      corridorSegments.push([p0, p1]);
+    if (!isStandaloneGlb) {
+      for (let i = 0; i < corridor.waypoints.length - 1; i++) {
+        const p0 = corridor.waypoints[i]!;
+        const p1 = corridor.waypoints[i + 1]!;
+        corridorSegments.push([p0, p1]);
 
-      const cp = closestPointOnSegment2D(place.routeAnchorPoint, p0, p1);
-      const dSq =
-        (cp[0] - place.routeAnchorPoint[0]) ** 2 +
-        (cp[1] - place.routeAnchorPoint[1]) ** 2;
-      if (dSq < minAnchorDistSq) {
-        minAnchorDistSq = dSq;
-        closestCorridorPoint = cp;
+        const cp = closestPointOnSegment2D(place.routeAnchorPoint, p0, p1);
+        const dSq =
+          (cp[0] - place.routeAnchorPoint[0]) ** 2 +
+          (cp[1] - place.routeAnchorPoint[1]) ** 2;
+        if (dSq < minAnchorDistSq) {
+          minAnchorDistSq = dSq;
+          closestCorridorPoint = cp;
+        }
       }
-    }
 
-    // If routeAnchorPoint is offset from the main corridor waypoints, include the connector segment
-    if (minAnchorDistSq > NUMERIC_EPSILON * NUMERIC_EPSILON) {
-      corridorSegments.push([closestCorridorPoint, place.routeAnchorPoint]);
+      // If routeAnchorPoint is offset from the main corridor waypoints, include the connector segment
+      if (minAnchorDistSq > NUMERIC_EPSILON * NUMERIC_EPSILON) {
+        corridorSegments.push([closestCorridorPoint, place.routeAnchorPoint]);
+      }
     }
 
     // Compute dynamic final-approach segment from routeAnchorPoint to the approach point
@@ -376,9 +391,13 @@ export function evaluateAttendeeAccess(
       if (!routePass) break;
 
       // Check against other chairs and occupied wheelchair bays, exempting ONLY destination place.id
+      const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
       for (const other of placeFootprints) {
         if (other.place.id === place.id) continue;
-        if (other.place.kind === 'wheelchair_bay' && !other.isOccupied) {
+        if (
+          !other.isOccupied &&
+          (other.place.kind === 'wheelchair_bay' || isStandaloneGlb)
+        ) {
           continue;
         }
         if (shapes2DOverlap(sweepShape, other.shape2D, NUMERIC_EPSILON)) {

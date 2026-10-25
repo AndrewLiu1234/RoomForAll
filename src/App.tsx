@@ -296,30 +296,34 @@ export function App(): React.ReactElement {
 
   const handleSelectVenuePreset = (preset: VenuePresetMode): void => {
     if (activeRun && activeRun.state !== 'finished') return;
-    if (preset === 'classroom_50') {
+    if (preset === 'classroom_50' || preset === 'torium_1528') {
+      const targetGlbName =
+        preset === 'torium_1528' ? 'torium.glb' : 'smallClassroom.glb';
       void (async () => {
         setErrorText(null);
         try {
-          const resp = await fetch('/venue/smallClassroom.glb');
+          const resp = await fetch(`/venue/${targetGlbName}`);
           if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status} loading /venue/smallClassroom.glb`);
+            throw new Error(`HTTP ${resp.status} loading /venue/${targetGlbName}`);
           }
           const buf = new Uint8Array(await resp.arrayBuffer());
           const report = await parseAndLabelGlbVenueAsync(buf, {
-            fileName: 'smallClassroom.glb',
-            yieldDelayMs: 60,
+            fileName: targetGlbName,
+            yieldDelayMs: 40,
             standaloneRandomFour: true,
             onProgress: (upd) => setGlbParseProgress(upd),
           });
           setGlbParseReport(report);
-          setVenuePreset('classroom_50');
+          setVenuePreset(preset);
           setBaselineSnapshot(report.snapshot);
-          setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+          const evalRes = evaluateSceneWithFallback(report.snapshot);
+          setBaselineEvaluation(evalRes);
           setActiveRun(null);
           setViewingStage('baseline');
           setTimeout(() => setGlbParseProgress(null), 500);
           setCaptureStatusText(
-            `Loaded 50-Seat University Lecture Classroom (smallClassroom.glb): parsed ${report.counts.seats} 3D chairs across 5 tiers, Sight Target "${report.snapshot.target.id}", and spawned ${report.snapshot.roster.length} people at random.`,
+            evalRes.evacuation?.evacuationImpossibleReason ??
+              `Loaded ${targetGlbName}: parsed ${report.counts.seats} 3D chairs, Sight Target "${report.snapshot.target.id}", and spawned ${report.snapshot.roster.length} people at random.`,
           );
           setSelectedAttendeeId(
             report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
@@ -329,7 +333,9 @@ export function App(): React.ReactElement {
           );
         } catch (err) {
           setErrorText(
-            err instanceof Error ? err.message : 'Failed to load smallClassroom.glb',
+            err instanceof Error
+              ? err.message
+              : `Failed to load ${targetGlbName}`,
           );
         }
       })();
@@ -407,11 +413,14 @@ export function App(): React.ReactElement {
       setGlbParseReport(report);
       setVenuePreset('custom_glb');
       setBaselineSnapshot(report.snapshot);
-      setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+      const evalRes = evaluateSceneWithFallback(report.snapshot);
+      setBaselineEvaluation(evalRes);
       setActiveRun(null);
       setViewingStage('baseline');
+      setTimeout(() => setGlbParseProgress(null), 500);
       setCaptureStatusText(
-        `Loaded standalone 3D building "${file.name}": parsed ${report.counts.seats} seats & ${report.counts.wheelchairBays} wheelchair bays, and spawned ${report.snapshot.roster.length} people at random. Use WASD+E/C to fly through or add/remove people in seats!`,
+        evalRes.evacuation?.evacuationImpossibleReason ??
+          `Loaded standalone 3D building "${file.name}": parsed ${report.counts.seats} seats & ${report.counts.wheelchairBays} wheelchair bays, and spawned ${report.snapshot.roster.length} people at random. Use WASD+E/C to fly through or add/remove people in seats!`,
       );
       setSelectedAttendeeId(
         report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')

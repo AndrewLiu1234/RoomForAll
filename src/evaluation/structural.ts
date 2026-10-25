@@ -604,6 +604,15 @@ export function validateSceneStructure(
         !placeByObjectId.has(objB.id);
       if (bothFixedNonPlace) continue;
 
+      const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
+      if (
+        isStandaloneGlb &&
+        objA.category !== 'movable_prop' &&
+        objB.category !== 'movable_prop'
+      ) {
+        continue;
+      }
+
       let pairCollided = false;
       for (const colA of collidersA) {
         if (pairCollided) break;

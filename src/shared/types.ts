@@ -165,7 +165,7 @@ export interface VenueExitPortal {
   label: string;
   /** Floor-plane center [x, z] in metres */
   position: Vec2;
-  /** Platform / floor elevation in metres (e.g. 0.30m for elevated wheelchair terrace) */
+  /** Platform / 3D floor elevation Y in metres (e.g. 0.30m for elevated wheelchair terrace, defaults to 0.0) */
   elevationM?: number;
   /** Clear portal door width in metres */
   widthM: number;
@@ -183,6 +183,8 @@ export interface EvacuationAgentFrameState {
   speedMps: number;
   state: 'seated' | 'extricating' | 'walking' | 'queuing' | 'exited';
   targetExitId: string;
+  /** True if this agent is blocked by a wall/barrier and cannot reach any exit without phasing through objects */
+  trappedByWall?: boolean;
 }
 
 export interface EvacuationBottleneckZone {
@@ -203,6 +205,12 @@ export interface EvacuationSimResult {
   totalExitCount: number;
   peakCongestionDensity: number;
   jammedAttendeeIds: string[];
+  /** Number of attendees who cannot reach any exit without phasing through walls/barriers */
+  trappedCount?: number;
+  /** IDs of attendees trapped by walls or isolated levels */
+  trappedAttendeeIds?: string[];
+  /** Human-readable explanation when exit is impossible without phasing through walls */
+  evacuationImpossibleReason?: string;
   bottleneckZones: EvacuationBottleneckZone[];
   attendeeTimesSec: Record<string, number>;
   frames: Array<{
@@ -274,6 +282,8 @@ export interface LayoutPatch {
   parentSceneHash: string;
   diagnosis: EvidenceFinding[];
   operations: PatchOperation[];
+  /** Optional new reachable exit portals synthesized by the repairer when existing exits are unreachable without phasing through walls */
+  addedExits?: VenueExitPortal[];
   summary: string;
 }
 

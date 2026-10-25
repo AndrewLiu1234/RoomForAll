@@ -420,6 +420,18 @@ export function applyAndValidatePatch(
     return { valid: false, errors };
   }
 
+  if (Array.isArray(patch.addedExits) && patch.addedExits.length > 0) {
+    const existingExits = nextSnapshot.exits ? [...nextSnapshot.exits] : [];
+    const existingIds = new Set(existingExits.map((e) => e.id));
+    for (const newExit of patch.addedExits) {
+      if (!existingIds.has(newExit.id)) {
+        existingExits.push(structuredClone(newExit));
+        existingIds.add(newExit.id);
+      }
+    }
+    nextSnapshot.exits = existingExits;
+  }
+
   const updatedSnapshot = withUpdatedSceneHash(nextSnapshot);
   const structuralErrors = validateSceneStructure(updatedSnapshot);
   if (structuralErrors.length > 0) {

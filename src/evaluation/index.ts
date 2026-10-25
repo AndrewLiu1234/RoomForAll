@@ -214,6 +214,9 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
         totalExitCount: evacResult.totalExitCount,
         peakCongestionDensity: evacResult.peakCongestionDensity,
         jammedAttendeeIds: evacResult.jammedAttendeeIds,
+        trappedCount: evacResult.trappedCount,
+        trappedAttendeeIds: evacResult.trappedAttendeeIds,
+        evacuationImpossibleReason: evacResult.evacuationImpossibleReason,
         bottleneckZones: evacResult.bottleneckZones,
         attendeeTimesSec: evacResult.attendeeTimesSec,
       }

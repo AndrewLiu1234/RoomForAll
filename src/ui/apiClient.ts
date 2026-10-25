@@ -14,6 +14,7 @@ import {
 import {
   applyAndValidatePatch,
   compareEvaluations,
+  synthesizeReachableExitsForSnapshot,
 } from '../evaluation/index.js';
 import {
   PREPARED_VENUE_SCENE_ID,
@@ -139,7 +140,8 @@ export function createLocalFixtureRepairPreviewRun(
     hasPreparedProps
   ) {
     const isBunched =
-      baselineSnapshot.sceneId === 'scene_community_hall_24_bunched';
+      baselineSnapshot.sceneId === 'scene_community_hall_24_bunched' ||
+      baselineSnapshot.objects.some((o) => o.id === 'obj_prop_exit_barrier');
     const rawPatch = isBunched
       ? createBunchedEmergencyReferencePatch(
           'preview_dev_fixture',
@@ -310,6 +312,26 @@ export function createLocalFixtureRepairPreviewRun(
       }
     }
 
+    const addedExits = synthesizeReachableExitsForSnapshot(currentSnap);
+    if (addedExits.length > 0) {
+      currentSnap = withUpdatedSceneHash({
+        ...currentSnap,
+        exits: [...(currentSnap.exits ?? []), ...addedExits],
+      });
+      currentEval = evaluateSceneWithFallback(currentSnap);
+    }
+
+    const improved = ops.length > 0 || addedExits.length > 0;
+    const summaryParts: string[] = [];
+    if (ops.length > 0) {
+      summaryParts.push(`Applied ${ops.length} bounded prop adjustment(s)`);
+    }
+    if (addedExits.length > 0) {
+      summaryParts.push(
+        `Added ${addedExits.length} reachable emergency exit(s) (${addedExits.map((e) => `${e.label} at [${e.position[0].toFixed(1)}, ${(e.elevationM ?? 0).toFixed(1)}, ${e.position[1].toFixed(1)}]m`).join('; ')}) so all attendees can evacuate without phasing through walls`,
+      );
+    }
+
     const combinedPatch: LayoutPatch = {
       contractVersion: CONTRACT_VERSION,
       runId: 'preview_custom_glb',
@@ -318,22 +340,25 @@ export function createLocalFixtureRepairPreviewRun(
         {
           viewId: 'view_overview_room',
           timestampSec: 1.0,
-          observation: `Evaluated ${editableProps.length} movable props in uploaded .glb venue.`,
+          observation:
+            baselineEvaluation.evacuation?.evacuationImpossibleReason ??
+            `Evaluated ${editableProps.length} movable props and egress paths in uploaded .glb venue.`,
         },
       ],
       operations: ops,
+      addedExits: addedExits.length > 0 ? addedExits : undefined,
       summary:
-        ops.length > 0
-          ? `Applied ${ops.length} bounded prop adjustment(s) on uploaded .glb venue.`
-          : 'No movable prop adjustments improved the uploaded .glb venue.',
+        summaryParts.length > 0
+          ? `${summaryParts.join(' · ')}.`
+          : 'All attendees already have clear sightlines and unobstructed wall-free paths to exits.',
     };
 
     return {
       contractVersion: CONTRACT_VERSION,
       runId: 'preview_custom_glb',
       state: 'finished',
-      outcome: ops.length > 0 ? 'improved' : 'no_improvement',
-      terminalReason: 'Local Uploaded .glb Repair Preview.',
+      outcome: improved ? 'improved' : 'no_improvement',
+      terminalReason: combinedPatch.summary,
       createdAtIso: nowIso,
       updatedAtIso: nowIso,
       deadlineIso: nowIso,
@@ -348,7 +373,7 @@ export function createLocalFixtureRepairPreviewRun(
           patch: combinedPatch,
           candidateSceneHash: currentSnap.sceneHash,
           evaluation: currentEval,
-          comparisonOutcome: ops.length > 0 ? 'accepted' : 'rejected_no_improvement',
+          comparisonOutcome: improved ? 'accepted' : 'rejected_no_improvement',
           rejectionReasons: [],
           timestampIso: nowIso,
         },
