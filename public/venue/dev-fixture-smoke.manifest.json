@@ -3,7 +3,7 @@
   "captureId": "cap_smoke_dev_fixture_baseline",
   "runId": "run_smoke_dev_fixture",
   "phase": "baseline",
-  "sceneHash": "vp_37a1fa125495fb41",
+  "sceneHash": "vp_5daccbea47ff3021",
   "mimeType": "video/webm",
   "byteLength": 704,
   "durationSec": 3,
@@ -78,14 +78,14 @@
       "attendeeId": "att_wheelchair_01",
       "placeId": "place_bay_wc_01",
       "cameraPosition": [
-        -2,
+        -2.2,
         1.18,
-        0.5
+        -0.8
       ],
       "cameraLookAt": [
-        -2,
+        -2.2,
         1.18,
-        -4.5
+        -5.8
       ],
       "fovDeg": 90,
       "aspect": 1,

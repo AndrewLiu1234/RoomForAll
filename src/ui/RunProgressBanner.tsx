@@ -10,6 +10,8 @@ export interface RunProgressBannerProps {
   isCapturingClip: boolean;
   captureStatusText: string | null;
   errorText: string | null;
+  venuePreset?: 'prepared_24' | 'dev_4';
+  onSelectVenuePreset?: (preset: 'prepared_24' | 'dev_4') => void;
   onStartLiveRun: () => void;
   onPreviewLocalRepair: () => void;
   onResetToBaseline: () => void;
@@ -31,6 +33,8 @@ export function RunProgressBanner({
   isCapturingClip,
   captureStatusText,
   errorText,
+  venuePreset = 'prepared_24',
+  onSelectVenuePreset,
   onStartLiveRun,
   onPreviewLocalRepair,
   onResetToBaseline,
@@ -110,6 +114,38 @@ export function RunProgressBanner({
 
         {/* Action Buttons & Live Timer */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {onSelectVenuePreset && (
+            <div
+              style={{
+                display: 'inline-flex',
+                gap: '4px',
+                padding: '3px',
+                borderRadius: 'var(--radius-inner)',
+                background: 'var(--bg-surface-elevated)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <button
+                type="button"
+                className={`vp-btn ${venuePreset === 'prepared_24' ? 'vp-btn-primary' : ''}`}
+                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
+                disabled={isRunning || isCapturingClip}
+                onClick={() => onSelectVenuePreset('prepared_24')}
+              >
+                24-Place Village Hall
+              </button>
+              <button
+                type="button"
+                className={`vp-btn ${venuePreset === 'dev_4' ? 'vp-btn-primary' : ''}`}
+                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
+                disabled={isRunning || isCapturingClip}
+                onClick={() => onSelectVenuePreset('dev_4')}
+              >
+                4-Place Compact Hall
+              </button>
+            </div>
+          )}
+
           {activeRun && (
             <div
               className="vp-card-inner"

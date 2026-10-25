@@ -184,7 +184,7 @@
         "position": [
           0,
           0,
-          -2.35
+          -2.45
         ],
         "yawDeg": 0
       },
@@ -192,7 +192,7 @@
         "position": [
           0,
           0,
-          -2.35
+          -2.45
         ],
         "yawDeg": 0
       },
@@ -2337,5 +2337,5 @@
       "assignedPlaceId": "place_bay_wc_01"
     }
   ],
-  "sceneHash": "vp_acff0fa97a14c5e6"
+  "sceneHash": "vp_1bd88b936a68191b"
 }

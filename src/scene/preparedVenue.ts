@@ -598,8 +598,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'Movable Welcome Sign / Sponsor Standee',
       category: 'movable_prop',
       editable: true,
-      transform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
-      baselineTransform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
+      transform: { position: [0.0, 0.0, -2.45], yawDeg: 0 },
+      baselineTransform: { position: [0.0, 0.0, -2.45], yawDeg: 0 },
       allowedBounds: { minX: -3.5, maxX: 3.5, minZ: -3.8, maxZ: 0.5 },
       proxies: [
         {
@@ -607,9 +607,9 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
           kind: 'box',
           localPosition: [0.0, 0.61, 0.0],
           localYawDeg: 0,
-          // 0.42m wide x 1.22m tall standee at [0.0, 0.0, -2.35]:
+          // 0.42m wide x 1.22m tall standee at [0.0, 0.0, -2.45]:
           // Directly occludes `att_shorter_01` (at [0, 0, -2.00], eyeY=0.97m), while
-          // sitting below all sightlines from Row 2+ (where lowest ray at Z=-2.35m is Y=1.27m).
+          // sitting below all sightlines from Row 2+ and clear of Row 1 seat footprint (Z >= -2.325m).
           // Shifting by [-0.55, 0, 0] moves it to X=-0.55m, giving 135/135 visibility to all 24 seats!
           size: [0.42, 1.22, 0.16],
           blocksVisibility: true,

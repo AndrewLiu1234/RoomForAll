@@ -11,6 +11,11 @@ import {
   type SceneSnapshot,
   type UploadEvidenceResponse,
 } from '../shared/index.js';
+import { applyAndValidatePatch } from '../evaluation/index.js';
+import {
+  PREPARED_VENUE_SCENE_ID,
+  createPreparedVenueReferencePatch,
+} from '../scene/index.js';
 import { evaluateSceneWithFallback } from './localEvaluatorFallback.js';
 
 export async function postPreview(
@@ -118,6 +123,83 @@ export function createLocalFixtureRepairPreviewRun(
   baselineSnapshot: SceneSnapshot,
 ): RunRecord {
   const baselineEvaluation = evaluateSceneWithFallback(baselineSnapshot);
+  const nowIso = new Date().toISOString();
+
+  if (baselineSnapshot.sceneId === PREPARED_VENUE_SCENE_ID) {
+    const patch = createPreparedVenueReferencePatch(
+      'preview_dev_fixture',
+      baselineSnapshot.sceneHash,
+    );
+    const validated = applyAndValidatePatch(
+      baselineSnapshot,
+      baselineSnapshot,
+      patch,
+    );
+    const bestSnapshot = validated.snapshot
+      ? withUpdatedSceneHash(validated.snapshot)
+      : baselineSnapshot;
+    const bestEvaluation = evaluateSceneWithFallback(bestSnapshot);
+
+    return {
+      contractVersion: CONTRACT_VERSION,
+      runId: 'preview_dev_fixture',
+      state: 'finished',
+      outcome: 'improved',
+      terminalReason:
+        'Local 24-Place Reference Repair Preview (use "Review and Improve" for live Gemini 4 Argon run).',
+      createdAtIso: nowIso,
+      updatedAtIso: nowIso,
+      deadlineIso: nowIso,
+      elapsedMs: 0,
+      baselineSnapshot,
+      baselineEvaluation,
+      bestSnapshot,
+      bestEvaluation,
+      attempts: [
+        {
+          attemptIndex: 0,
+          patch,
+          candidateSceneHash: bestSnapshot.sceneHash,
+          evaluation: bestEvaluation,
+          comparisonOutcome: 'accepted',
+          rejectionReasons: [],
+          timestampIso: nowIso,
+        },
+      ],
+      finalInspection: {
+        captureId: 'cap_preview_revision_24',
+        sceneHash: bestSnapshot.sceneHash,
+        findings: [
+          {
+            attendeeId: 'att_shorter_01',
+            viewId: 'view_pov_att_shorter_01',
+            timestampSec: 3.5,
+            observation:
+              'Shifting obj_prop_welcome_sign 0.55m west cleared the central screen sightline for Row 1 Center (135/135 visible samples).',
+          },
+          {
+            attendeeId: 'att_extra_legroom_01',
+            viewId: 'view_pov_att_extra_legroom_01',
+            timestampSec: 6.0,
+            observation:
+              'Shifting obj_prop_catering_table 0.55m toward the stage restored full >= 0.55m front legroom for Row 1 East seats.',
+          },
+          {
+            attendeeId: 'att_wheelchair_01',
+            viewId: 'view_pov_att_wheelchair_01',
+            timestampSec: 8.5,
+            observation:
+              'Shifting obj_prop_av_cart 0.60m east cleared Wheelchair Bay W2 turning circle (1.55m diameter unobstructed).',
+          },
+        ],
+        remainingIssuesSummary:
+          'All 24 audience places now satisfy sightline, route, footprint, front-legroom, and wheelchair turning-space requirements (0 failed checks).',
+      },
+      providerModel: 'local-reference-preview (no paid model call)',
+      providerRequestIds: [],
+    };
+  }
+
   const repairedObjects = baselineSnapshot.objects.map((obj) => {
     if (obj.id === 'obj_prop_sign_01') {
       return {
@@ -174,7 +256,6 @@ export function createLocalFixtureRepairPreviewRun(
     ],
   };
 
-  const nowIso = new Date().toISOString();
   return {
     contractVersion: CONTRACT_VERSION,
     runId: 'preview_dev_fixture',

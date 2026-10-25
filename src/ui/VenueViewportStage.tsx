@@ -32,11 +32,19 @@ export function VenueViewportStage({
     azimuthRad: number;
     polarRad: number;
     distanceM: number;
-  }>({
+  }>(() => ({
     azimuthRad: 0.38,
     polarRad: 0.92,
-    distanceM: 7.4,
-  });
+    distanceM: snapshot.places.length > 8 ? 10.8 : 7.4,
+  }));
+
+  useEffect(() => {
+    setOrbitAngles({
+      azimuthRad: 0.38,
+      polarRad: 0.92,
+      distanceM: snapshot.places.length > 8 ? 10.8 : 7.4,
+    });
+  }, [snapshot.sceneId]);
   const dragStateRef = useRef<{
     dragging: boolean;
     lastX: number;
@@ -145,6 +153,44 @@ export function VenueViewportStage({
           color: attEval?.routeStatus === 'blocked' ? 0xef4444 : 0x22c55e,
         });
         scene.add(new THREE.Line(appGeo, appMat));
+      }
+
+      // Draw baseline -> revised displacement vectors for any object moved by a patch
+      for (const obj of snapshot.objects) {
+        const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
+        const dz = obj.transform.position[2] - obj.baselineTransform.position[2];
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.01) {
+          const ghostGeo = new THREE.RingGeometry(0.18, 0.25, 24);
+          const ghostMat = new THREE.MeshBasicMaterial({
+            color: 0xfbbf24,
+            side: THREE.DoubleSide,
+          });
+          const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
+          ghostMesh.rotation.x = -Math.PI / 2;
+          ghostMesh.position.set(
+            obj.baselineTransform.position[0],
+            0.035,
+            obj.baselineTransform.position[2],
+          );
+          scene.add(ghostMesh);
+
+          const dir = new THREE.Vector3(dx, 0, dz).normalize();
+          const origin = new THREE.Vector3(
+            obj.baselineTransform.position[0],
+            0.12,
+            obj.baselineTransform.position[2],
+          );
+          const arrow = new THREE.ArrowHelper(
+            dir,
+            origin,
+            dist,
+            0x34d399,
+            Math.min(0.22, dist * 0.4),
+            0.14,
+          );
+          scene.add(arrow);
+        }
       }
     }
 

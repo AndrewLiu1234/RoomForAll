@@ -9,6 +9,7 @@ import {
   type RunRecord,
   type SceneSnapshot,
 } from './shared/index.js';
+import { createPreparedVenueSnapshot } from './scene/index.js';
 import {
   ComparisonPanel,
   ProfileEditorModal,
@@ -25,16 +26,21 @@ import {
 } from './ui/index.js';
 
 export function App(): React.ReactElement {
-  const initialSnapshot = useMemo(() => createDevFixtureSnapshot(), []);
+  const [venuePreset, setVenuePreset] = useState<'prepared_24' | 'dev_4'>(
+    'prepared_24',
+  );
+  const initialSnapshot = useMemo(() => createPreparedVenueSnapshot(), []);
   const [baselineSnapshot, setBaselineSnapshot] =
     useState<SceneSnapshot>(initialSnapshot);
   const [baselineEvaluation, setBaselineEvaluation] = useState<Evaluation>(() =>
     evaluateSceneWithFallback(initialSnapshot),
   );
 
-  // Default to Sam (Shorter Viewer at R2-1) so the initial obstruction is immediately visible
+  // Default to Sam (Shorter Viewer at R1-C3 / R2-1) so the initial obstruction is immediately visible
   const [selectedAttendeeId, setSelectedAttendeeId] = useState<string>(
     () =>
+      initialSnapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+        ?.attendeeId ??
       initialSnapshot.roster.find((a) => a.profileId === 'shorter_seated')
         ?.attendeeId ??
       initialSnapshot.roster[0]?.attendeeId ??
@@ -128,6 +134,21 @@ export function App(): React.ReactElement {
         `Recording ${pending.phase} inspection video (${pending.captureId}) on dedicated 512×512 canvas…`,
       );
 
+      // Step the visible 3D viewport through the tour keyframes in real time while recording
+      const tourTimers: Array<ReturnType<typeof setTimeout>> = [];
+      for (const kf of pending.keyframes) {
+        const timer = setTimeout(() => {
+          if (cancelled) return;
+          if (kf.kind === 'attendee_pov' && kf.attendeeId) {
+            setSelectedAttendeeId(kf.attendeeId);
+            setViewMode('attendee_pov');
+          } else {
+            setViewMode('overview');
+          }
+        }, Math.max(0, kf.startSec * 1000));
+        tourTimers.push(timer);
+      }
+
       try {
         const { videoBlob, manifest } = await captureEvidenceWithFallback(
           pending.snapshot,
@@ -145,6 +166,12 @@ export function App(): React.ReactElement {
         const refreshed = await getRunStatus(activeRun.runId);
         if (cancelled) return;
         setActiveRun(refreshed.run);
+        if (
+          refreshed.run.bestSnapshot.sceneHash !==
+          refreshed.run.baselineSnapshot.sceneHash
+        ) {
+          setViewingStage('best');
+        }
         setCaptureStatusText(
           `Uploaded ${pending.phase} evidence (${manifest.captureId}). Waiting for Argon controller (${refreshed.run.state})…`,
         );
@@ -157,6 +184,7 @@ export function App(): React.ReactElement {
             : 'Failed to capture or upload evidence.',
         );
       } finally {
+        for (const t of tourTimers) clearTimeout(t);
         if (!cancelled) {
           setIsCapturingClip(false);
         }
@@ -254,13 +282,36 @@ export function App(): React.ReactElement {
     }
   };
 
+  const handleSelectVenuePreset = (preset: 'prepared_24' | 'dev_4'): void => {
+    if (activeRun && activeRun.state !== 'finished') return;
+    const nextSnap =
+      preset === 'prepared_24'
+        ? createPreparedVenueSnapshot()
+        : createDevFixtureSnapshot();
+    setVenuePreset(preset);
+    setBaselineSnapshot(nextSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(nextSnap));
+    setActiveRun(null);
+    setViewingStage('baseline');
+    setCaptureStatusText(null);
+    setErrorText(null);
+    setSelectedAttendeeId(
+      nextSnap.roster.find((a) => a.attendeeId === 'att_shorter_01')
+        ?.attendeeId ??
+        nextSnap.roster[0]?.attendeeId ??
+        '',
+    );
+  };
+
   const handlePreviewLocalRepair = (): void => {
     setErrorText(null);
     const previewRun = createLocalFixtureRepairPreviewRun(baselineSnapshot);
     setActiveRun(previewRun);
     setViewingStage('best');
     setCaptureStatusText(
-      'Showing Local Dev Fixture Repair Preview (obj_prop_sign_01 shifted -0.55m X; Sam R2-1 visibility 67/135 → 135/135).',
+      venuePreset === 'prepared_24'
+        ? 'Showing 24-Place Reference Repair Preview (welcome sign, literature table, and AV cart relocated; all 24 places pass).'
+        : 'Showing 4-Place Compact Hall Repair Preview (obj_prop_sign_01 shifted; Sam R2-1 visibility 54/135 → 135/135).',
     );
   };
 
@@ -287,6 +338,8 @@ export function App(): React.ReactElement {
         isCapturingClip={isCapturingClip}
         captureStatusText={captureStatusText}
         errorText={errorText}
+        venuePreset={venuePreset}
+        onSelectVenuePreset={handleSelectVenuePreset}
         onStartLiveRun={() => void handleStartLiveRun()}
         onPreviewLocalRepair={handlePreviewLocalRepair}
         onResetToBaseline={handleResetToBaseline}

@@ -148,4 +148,39 @@ describe('Stream D — Shared Integration Contracts', () => {
     expect(captured.manifest.sceneHash).toBe(baseline.sceneHash);
     expect(captured.manifest.keyframes.length).toBe(1 + baseline.roster.length);
   });
+
+  it('evaluates and repairs the full 24-place Prepared Community Hall using Stream B evaluator', async () => {
+    const {
+      createPreparedVenueSnapshot,
+      createPreparedVenueReferencePatch,
+    } = await import('../../src/scene/index.js');
+    const {
+      evaluateScene,
+      applyAndValidatePatch,
+      compareEvaluations,
+    } = await import('../../src/evaluation/index.js');
+
+    const baseSnap = createPreparedVenueSnapshot();
+    const baseEval = evaluateScene(baseSnap);
+    if (!baseEval.isValidStructure) {
+      console.log('PreparedVenue structuralErrors:', baseEval.structuralErrors);
+    }
+    expect(baseEval.isValidStructure).toBe(true);
+    expect(baseEval.capacityCount).toBe(24);
+    expect(baseEval.occupiedCount).toBe(24);
+    expect(baseEval.allModeledRequirementsMet).toBe(false);
+
+    const patch = createPreparedVenueReferencePatch(
+      'run_prep_24',
+      baseSnap.sceneHash,
+    );
+    const validated = applyAndValidatePatch(baseSnap, baseSnap, patch);
+    expect(validated.valid).toBe(true);
+    expect(validated.snapshot).toBeDefined();
+
+    const candEval = evaluateScene(validated.snapshot!);
+    const cmp = compareEvaluations(baseEval, candEval);
+    expect(cmp.accepted).toBe(true);
+    expect(candEval.allModeledRequirementsMet).toBe(true);
+  });
 });
