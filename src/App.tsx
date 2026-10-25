@@ -12,7 +12,8 @@ import {
 import {
   createPreparedVenueSnapshot,
   generateSampleCustomAuditoriumGlb,
-  parseAndLabelGlbVenue,
+  parseAndLabelGlbVenueAsync,
+  type GlbParseProgressUpdate,
   type GlbVenueParseReport,
 } from './scene/index.js';
 import {
@@ -36,6 +37,8 @@ export function App(): React.ReactElement {
     useState<VenuePresetMode>('prepared_24');
   const [glbParseReport, setGlbParseReport] =
     useState<GlbVenueParseReport | null>(null);
+  const [glbParseProgress, setGlbParseProgress] =
+    useState<GlbParseProgressUpdate | null>(null);
   const initialSnapshot = useMemo(() => createPreparedVenueSnapshot(), []);
   const [baselineSnapshot, setBaselineSnapshot] =
     useState<SceneSnapshot>(initialSnapshot);
@@ -291,29 +294,45 @@ export function App(): React.ReactElement {
 
   const handleSelectVenuePreset = (preset: VenuePresetMode): void => {
     if (activeRun && activeRun.state !== 'finished') return;
-    let nextSnap: SceneSnapshot;
-    if (preset === 'prepared_24') {
-      nextSnap = createPreparedVenueSnapshot();
-    } else if (preset === 'dev_4') {
-      nextSnap = createDevFixtureSnapshot();
-    } else {
-      const sampleGlb = generateSampleCustomAuditoriumGlb();
-      const report = parseAndLabelGlbVenue(sampleGlb.glbBytes, {
-        fileName: sampleGlb.fileName,
-      });
-      setGlbParseReport(report);
-      nextSnap = report.snapshot;
+    if (preset === 'custom_glb') {
+      void (async () => {
+        setErrorText(null);
+        const sampleGlb = generateSampleCustomAuditoriumGlb();
+        const report = await parseAndLabelGlbVenueAsync(sampleGlb.glbBytes, {
+          fileName: sampleGlb.fileName,
+          yieldDelayMs: 90,
+          onProgress: (upd) => setGlbParseProgress(upd),
+        });
+        setGlbParseReport(report);
+        setVenuePreset('custom_glb');
+        setBaselineSnapshot(report.snapshot);
+        setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+        setActiveRun(null);
+        setViewingStage('baseline');
+        setCaptureStatusText(
+          'Parsed 16-Place Civic Auditorium (.glb): auto-labeled 14 seats, 2 wheelchair bays, stage, screen, routes, and 3 movable props.',
+        );
+        setSelectedAttendeeId(
+          report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+            ?.attendeeId ??
+            report.snapshot.roster[0]?.attendeeId ??
+            '',
+        );
+      })();
+      return;
     }
+
+    const nextSnap =
+      preset === 'prepared_24'
+        ? createPreparedVenueSnapshot()
+        : createDevFixtureSnapshot();
+    setGlbParseProgress(null);
     setVenuePreset(preset);
     setBaselineSnapshot(nextSnap);
     setBaselineEvaluation(evaluateSceneWithFallback(nextSnap));
     setActiveRun(null);
     setViewingStage('baseline');
-    setCaptureStatusText(
-      preset === 'custom_glb'
-        ? 'Parsed 16-Place Civic Auditorium (.glb): auto-labeled 14 seats, 2 wheelchair bays, stage, screen, routes, and 3 movable props.'
-        : null,
-    );
+    setCaptureStatusText(null);
     setErrorText(null);
     setSelectedAttendeeId(
       nextSnap.roster.find((a) => a.attendeeId === 'att_shorter_01')
@@ -327,8 +346,20 @@ export function App(): React.ReactElement {
     if (activeRun && activeRun.state !== 'finished') return;
     setErrorText(null);
     try {
+      setGlbParseProgress({
+        stage: 'reading_file',
+        stepIndex: 0,
+        totalSteps: 6,
+        percent: 6,
+        label: 'Reading .glb File from Disk',
+        detail: `Loading ${file.name} (${(file.size / 1024).toFixed(1)} KB)…`,
+      });
       const buf = new Uint8Array(await file.arrayBuffer());
-      const report = parseAndLabelGlbVenue(buf, { fileName: file.name });
+      const report = await parseAndLabelGlbVenueAsync(buf, {
+        fileName: file.name,
+        yieldDelayMs: 110,
+        onProgress: (upd) => setGlbParseProgress(upd),
+      });
       setGlbParseReport(report);
       setVenuePreset('custom_glb');
       setBaselineSnapshot(report.snapshot);
@@ -345,8 +376,11 @@ export function App(): React.ReactElement {
           '',
       );
     } catch (err) {
+      setGlbParseProgress(null);
       setErrorText(
-        err instanceof Error ? err.message : 'Failed to parse uploaded .glb file.',
+        err instanceof Error
+          ? err.message
+          : 'Failed to parse uploaded .glb file.',
       );
     }
   };
@@ -388,6 +422,7 @@ export function App(): React.ReactElement {
         errorText={errorText}
         venuePreset={venuePreset}
         glbParseReport={glbParseReport}
+        glbParseProgress={glbParseProgress}
         onSelectVenuePreset={handleSelectVenuePreset}
         onUploadGlbFile={(file) => void handleUploadGlbFile(file)}
         onStartLiveRun={() => void handleStartLiveRun()}

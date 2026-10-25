@@ -4,7 +4,10 @@ import {
   type RunRecord,
   type RunState,
 } from '../shared/index.js';
-import type { GlbVenueParseReport } from '../scene/index.js';
+import type {
+  GlbParseProgressUpdate,
+  GlbVenueParseReport,
+} from '../scene/index.js';
 
 export type VenuePresetMode = 'prepared_24' | 'dev_4' | 'custom_glb';
 
@@ -15,6 +18,7 @@ export interface RunProgressBannerProps {
   errorText: string | null;
   venuePreset?: VenuePresetMode;
   glbParseReport?: GlbVenueParseReport | null;
+  glbParseProgress?: GlbParseProgressUpdate | null;
   onSelectVenuePreset?: (preset: VenuePresetMode) => void;
   onUploadGlbFile?: (file: File) => void;
   onStartLiveRun: () => void;
@@ -40,6 +44,7 @@ export function RunProgressBanner({
   errorText,
   venuePreset = 'prepared_24',
   glbParseReport,
+  glbParseProgress,
   onSelectVenuePreset,
   onUploadGlbFile,
   onStartLiveRun,
@@ -47,6 +52,10 @@ export function RunProgressBanner({
   onResetToBaseline,
 }: RunProgressBannerProps): React.ReactElement {
   const isRunning = activeRun !== null && activeRun.state !== 'finished';
+  const isParsingGlb =
+    glbParseProgress !== null &&
+    glbParseProgress !== undefined &&
+    glbParseProgress.stage !== 'complete';
   const currentIdx = activeRun
     ? ORDERED_STATES.findIndex((s) => s.state === activeRun.state)
     : -1;
@@ -173,23 +182,32 @@ export function RunProgressBanner({
                   style={{
                     padding: '4px 9px',
                     fontSize: '0.73rem',
-                    cursor: isRunning || isCapturingClip ? 'default' : 'pointer',
-                    borderColor: 'rgba(167, 139, 250, 0.45)',
+                    cursor:
+                      isRunning || isCapturingClip || isParsingGlb
+                        ? 'wait'
+                        : 'pointer',
+                    borderColor: 'rgba(167, 139, 250, 0.55)',
                     color: '#c4b5fd',
+                    background: isParsingGlb
+                      ? 'rgba(139, 92, 246, 0.24)'
+                      : undefined,
                   }}
                   title="Upload any binary glTF 2.0 (.glb) 3D building to auto-parse and label seats, wheelchair bays, exits, stage, and props"
                 >
-                  Upload .glb Building
+                  {isParsingGlb
+                    ? `Parsing .glb (${glbParseProgress?.percent ?? 0}%)…`
+                    : 'Upload .glb Building'}
                   <input
                     type="file"
                     accept=".glb"
-                    disabled={isRunning || isCapturingClip}
+                    disabled={isRunning || isCapturingClip || isParsingGlb}
                     style={{ display: 'none' }}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
                         onUploadGlbFile(file);
                       }
+                      e.target.value = '';
                     }}
                   />
                 </label>
@@ -257,6 +275,64 @@ export function RunProgressBanner({
           )}
         </div>
       </div>
+
+      {/* Live GLB Upload & Auto-Labeling Progress Tracker */}
+      {glbParseProgress && glbParseProgress.stage !== 'complete' && (
+        <div
+          data-testid="glb-parse-progress"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            padding: '8px 12px',
+            borderRadius: 'var(--radius-inner)',
+            background: 'rgba(76, 29, 149, 0.28)',
+            border: '1px solid rgba(167, 139, 250, 0.5)',
+            fontSize: '0.75rem',
+            color: '#f5f3ff',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="vp-live-dot" />
+              <strong>{glbParseProgress.label}</strong>
+              <span style={{ color: '#c4b5fd' }}>
+                — {glbParseProgress.detail}
+              </span>
+            </div>
+            <span className="mono" style={{ fontWeight: 700, color: '#ddd6fe' }}>
+              {glbParseProgress.percent}%
+            </span>
+          </div>
+          <div
+            style={{
+              width: '100%',
+              height: '6px',
+              borderRadius: '999px',
+              background: 'rgba(15, 23, 42, 0.7)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                background: 'linear-gradient(90deg, #8b5cf6 0%, #38bdf8 100%)',
+                transformOrigin: 'left center',
+                transform: `scaleX(${Math.max(0.04, Math.min(1, glbParseProgress.percent / 100))})`,
+                transition: 'transform 140ms cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* GLB Auto-Labeler Summary Strip (shown when viewing an auto-parsed .glb venue) */}
       {glbParseReport && venuePreset === 'custom_glb' && (

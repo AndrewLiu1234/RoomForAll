@@ -40,7 +40,9 @@ import {
   getProxyWorldTransform,
   loadPreparedVenueManifest,
   parseAndLabelGlbVenue,
+  parseAndLabelGlbVenueAsync,
   parseVenueGlbBinary,
+  type GlbParseProgressUpdate,
 } from '../../src/scene/index.js';
 import {
   computeAttendeeSampleVisibilityMask,
@@ -756,7 +758,7 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(cmp.outcome).toBe('accepted');
   });
 
-  it('auto-labels seats, wheelchair bays, stage, screen, pillars, and props from a binary .glb venue via parseAndLabelGlbVenue', () => {
+  it('auto-labels seats, wheelchair bays, stage, screen, pillars, and props from a binary .glb venue via parseAndLabelGlbVenue', async () => {
     const venueDir = path.resolve(process.cwd(), 'public', 'venue');
     const glbBytes = new Uint8Array(
       fs.readFileSync(path.join(venueDir, 'prepared-venue.glb')),
@@ -821,5 +823,25 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
         evaluated.attendees[member.attendeeId]?.visibleSamples,
       );
     }
+
+    // Verify parseAndLabelGlbVenueAsync emits all 6 monotonically increasing progress updates
+    const progressUpdates: GlbParseProgressUpdate[] = [];
+    const asyncReport = await parseAndLabelGlbVenueAsync(customGlb.glbBytes, {
+      fileName: customGlb.fileName,
+      yieldDelayMs: 1,
+      onProgress: (u) => progressUpdates.push(u),
+    });
+    expect(asyncReport.snapshot.places).toHaveLength(16);
+    expect(progressUpdates).toHaveLength(6);
+    expect(progressUpdates.map((u) => u.stage)).toEqual([
+      'reading_header',
+      'traversing_hierarchy',
+      'classifying_nodes',
+      'synthesizing_routes',
+      'assigning_profiles',
+      'complete',
+    ]);
+    expect(progressUpdates[0]?.percent).toBe(15);
+    expect(progressUpdates[5]?.percent).toBe(100);
   });
 });

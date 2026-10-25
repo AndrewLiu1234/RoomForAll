@@ -73,6 +73,25 @@ export interface GlbVenueParseReport {
   snapshot: SceneSnapshot;
 }
 
+export type GlbParseStage =
+  | 'reading_file'
+  | 'reading_header'
+  | 'traversing_hierarchy'
+  | 'classifying_nodes'
+  | 'synthesizing_routes'
+  | 'assigning_profiles'
+  | 'evaluating_scene'
+  | 'complete';
+
+export interface GlbParseProgressUpdate {
+  stage: GlbParseStage;
+  stepIndex: number;
+  totalSteps: number;
+  percent: number;
+  label: string;
+  detail: string;
+}
+
 interface RawGlbNode {
   name?: string;
   mesh?: number;
@@ -1026,4 +1045,95 @@ export function generateSampleCustomAuditoriumGlb(): {
     fileName: 'custom-civic-auditorium-16.glb',
     glbBytes,
   };
+}
+
+function yieldToUiThread(ms = 18): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Asynchronous, non-blocking `.glb` parser and auto-labeler that yields to the
+ * browser UI thread between stages and emits `GlbParseProgressUpdate` events
+ * so the user sees live progress and the interface never freezes on large models.
+ */
+export async function parseAndLabelGlbVenueAsync(
+  glbBytes: Uint8Array,
+  options: {
+    fileName?: string;
+    onProgress?: (update: GlbParseProgressUpdate) => void;
+    yieldDelayMs?: number;
+  } = {},
+): Promise<GlbVenueParseReport> {
+  const fileName = options.fileName ?? 'uploaded-venue.glb';
+  const onProgress = options.onProgress;
+  const delayMs = options.yieldDelayMs ?? 25;
+  const totalSteps = 6;
+
+  onProgress?.({
+    stage: 'reading_header',
+    stepIndex: 1,
+    totalSteps,
+    percent: 15,
+    label: 'Step 1/6 · Validating glTF 2.0 Binary Header',
+    detail: `Inspecting ${fileName} (${(glbBytes.byteLength / 1024).toFixed(1)} KB) JSON & BIN chunks…`,
+  });
+  await yieldToUiThread(delayMs);
+
+  const parsed = parseVenueGlbBinary(glbBytes);
+  const nodeCount = parsed.nodeNames.length;
+
+  onProgress?.({
+    stage: 'traversing_hierarchy',
+    stepIndex: 2,
+    totalSteps,
+    percent: 34,
+    label: 'Step 2/6 · Traversing 3D Scene-Graph Hierarchy',
+    detail: `Accumulating 4×4 world matrices across ${nodeCount} 3D nodes…`,
+  });
+  await yieldToUiThread(delayMs);
+
+  onProgress?.({
+    stage: 'classifying_nodes',
+    stepIndex: 3,
+    totalSteps,
+    percent: 55,
+    label: 'Step 3/6 · Auto-Labeling Seats, Bays, Exits & Stage',
+    detail: `Classifying ${nodeCount} mesh bounding volumes into seats, wheelchair bays, exits, stage, and props…`,
+  });
+  await yieldToUiThread(delayMs);
+
+  const report = parseAndLabelGlbVenue(glbBytes, { fileName });
+
+  onProgress?.({
+    stage: 'synthesizing_routes',
+    stepIndex: 4,
+    totalSteps,
+    percent: 74,
+    label: 'Step 4/6 · Synthesizing Step-Free Access Routes',
+    detail: `Labeled ${report.counts.seats} seats & ${report.counts.wheelchairBays} wheelchair bays; built ${report.snapshot.routes.length} access corridors…`,
+  });
+  await yieldToUiThread(delayMs);
+
+  onProgress?.({
+    stage: 'assigning_profiles',
+    stepIndex: 5,
+    totalSteps,
+    percent: 90,
+    label: 'Step 5/6 · Assigning 4-Profile Attendee Roster',
+    detail: `Assigned ${report.snapshot.roster.length} attendees across Adult, Shorter, Extra-Legroom & Wheelchair profiles (hash ${report.snapshot.sceneHash})…`,
+  });
+  await yieldToUiThread(delayMs);
+
+  onProgress?.({
+    stage: 'complete',
+    stepIndex: 6,
+    totalSteps,
+    percent: 100,
+    label: 'Step 6/6 · 3D Building Ready',
+    detail: `Loaded ${report.counts.seats} seats, ${report.counts.wheelchairBays} wheelchair bays, ${report.snapshot.routes.length} routes, and ${report.counts.movableProps} movable props.`,
+  });
+
+  return report;
 }

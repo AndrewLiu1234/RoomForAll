@@ -34,8 +34,11 @@ export {
 export {
   generateSampleCustomAuditoriumGlb,
   parseAndLabelGlbVenue,
+  parseAndLabelGlbVenueAsync,
   type AutoLabeledGlbNode,
   type AutoLabeledNodeRole,
+  type GlbParseProgressUpdate,
+  type GlbParseStage,
   type GlbVenueParseReport,
 } from './glbAutoLabeler.js';
 

@@ -24,7 +24,8 @@ import {
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
   generateVenueGlbBinary,
-  parseAndLabelGlbVenue,
+  parseAndLabelGlbVenueAsync,
+  type GlbParseProgressUpdate,
   type GlbVenueParseReport,
   type OverviewCameraPreset,
 } from './index.js';
@@ -145,6 +146,8 @@ export function PartADemoApp(): React.ReactElement {
   const [recordError, setRecordError] = useState<string | null>(null);
   const [glbParseReport, setGlbParseReport] =
     useState<GlbVenueParseReport | null>(null);
+  const [glbParseProgress, setGlbParseProgress] =
+    useState<GlbParseProgressUpdate | null>(null);
   const [useParsedGlbSnapshot, setUseParsedGlbSnapshot] =
     useState<boolean>(false);
 
@@ -837,10 +840,12 @@ export function PartADemoApp(): React.ReactElement {
           <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 const { glbBytes } = generateVenueGlbBinary(baselineSnapshot);
-                const report = parseAndLabelGlbVenue(glbBytes, {
+                const report = await parseAndLabelGlbVenueAsync(glbBytes, {
                   fileName: 'prepared-venue.glb',
+                  yieldDelayMs: 90,
+                  onProgress: (upd) => setGlbParseProgress(upd),
                 });
                 setGlbParseReport(report);
               }}
@@ -879,10 +884,21 @@ export function PartADemoApp(): React.ReactElement {
                 style={{ display: 'none' }}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
+                  e.target.value = '';
                   if (!file) return;
+                  setGlbParseProgress({
+                    stage: 'reading_file',
+                    stepIndex: 0,
+                    totalSteps: 6,
+                    percent: 6,
+                    label: 'Reading .glb File…',
+                    detail: file.name,
+                  });
                   const buf = new Uint8Array(await file.arrayBuffer());
-                  const report = parseAndLabelGlbVenue(buf, {
+                  const report = await parseAndLabelGlbVenueAsync(buf, {
                     fileName: file.name,
+                    yieldDelayMs: 110,
+                    onProgress: (upd) => setGlbParseProgress(upd),
                   });
                   setGlbParseReport(report);
                   setUseParsedGlbSnapshot(true);
@@ -890,6 +906,55 @@ export function PartADemoApp(): React.ReactElement {
               />
             </label>
           </div>
+
+          {glbParseProgress && glbParseProgress.stage !== 'complete' && (
+            <div
+              style={{
+                padding: '8px',
+                borderRadius: '5px',
+                background: 'rgba(76, 29, 149, 0.35)',
+                border: '1px solid rgba(167, 139, 250, 0.45)',
+                marginBottom: '8px',
+                fontSize: '0.72rem',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '4px',
+                  fontWeight: 600,
+                  color: '#ddd6fe',
+                }}
+              >
+                <span>{glbParseProgress.label}</span>
+                <span>{glbParseProgress.percent}%</span>
+              </div>
+              <div style={{ color: '#cbd5e1', marginBottom: '6px' }}>
+                {glbParseProgress.detail}
+              </div>
+              <div
+                style={{
+                  width: '100%',
+                  height: '5px',
+                  borderRadius: '999px',
+                  background: '#0f172a',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #8b5cf6 0%, #38bdf8 100%)',
+                    transformOrigin: 'left center',
+                    transform: `scaleX(${Math.max(0.05, Math.min(1, glbParseProgress.percent / 100))})`,
+                    transition: 'transform 140ms cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {glbParseReport && (
             <div
