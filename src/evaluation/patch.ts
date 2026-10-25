@@ -179,24 +179,15 @@ export function applyAndValidatePatch(
     const dy = op.deltaPositionM[1];
     const dz = op.deltaPositionM[2];
 
-    // Check vertical lifting (dy must be 0)
-    if (Math.abs(dy) > NUMERIC_EPSILON) {
-      errors.push({
-        code: 'PATCH_LIMIT_EXCEEDED',
-        message: `Operation on ${op.targetId} attempts vertical translation (dy=${dy}); only horizontal movement is allowed.`,
-        targetId: op.targetId,
-      });
-      continue;
-    }
-
-    // Check per-axis delta bounds (|dx| <= 0.60, |dz| <= 0.60)
+    // Check per-axis delta bounds (|dx| <= 0.60, |dy| <= 0.60, |dz| <= 0.60)
     if (
       Math.abs(dx) > PATCH_CONSTRAINTS.maxAxisDeltaM + STEP_TOLERANCE ||
+      Math.abs(dy) > PATCH_CONSTRAINTS.maxAxisDeltaM + STEP_TOLERANCE ||
       Math.abs(dz) > PATCH_CONSTRAINTS.maxAxisDeltaM + STEP_TOLERANCE
     ) {
       errors.push({
         code: 'PATCH_LIMIT_EXCEEDED',
-        message: `Operation on ${op.targetId} exceeds maxAxisDeltaM (${PATCH_CONSTRAINTS.maxAxisDeltaM}m): dx=${dx}, dz=${dz}.`,
+        message: `Operation on ${op.targetId} exceeds maxAxisDeltaM (${PATCH_CONSTRAINTS.maxAxisDeltaM}m): dx=${dx}, dy=${dy}, dz=${dz}.`,
         targetId: op.targetId,
       });
       continue;
@@ -205,11 +196,12 @@ export function applyAndValidatePatch(
     // Check 0.05m step quantization
     if (
       !isStepMultiple(dx, PATCH_CONSTRAINTS.translationStepM) ||
+      !isStepMultiple(dy, PATCH_CONSTRAINTS.translationStepM) ||
       !isStepMultiple(dz, PATCH_CONSTRAINTS.translationStepM)
     ) {
       errors.push({
         code: 'PATCH_LIMIT_EXCEEDED',
-        message: `Operation on ${op.targetId} uses non-${PATCH_CONSTRAINTS.translationStepM}m step increment: dx=${dx}, dz=${dz}.`,
+        message: `Operation on ${op.targetId} uses non-${PATCH_CONSTRAINTS.translationStepM}m step increment: dx=${dx}, dy=${dy}, dz=${dz}.`,
         targetId: op.targetId,
       });
       continue;
@@ -243,7 +235,7 @@ export function applyAndValidatePatch(
         !obj.editable ||
         obj.category === 'fixed_structure' ||
         obj.category === 'stage' ||
-        obj.category === 'wheelchair_bay_frame'
+        (obj.category === 'wheelchair_bay_frame' && !obj.editable)
       ) {
         errors.push({
           code: 'FIXED_OBJECT_MODIFIED',
@@ -256,7 +248,7 @@ export function applyAndValidatePatch(
       obj.transform = {
         position: [
           snap4(obj.transform.position[0] + dx),
-          snap4(obj.transform.position[1]),
+          snap4(obj.transform.position[1] + dy),
           snap4(obj.transform.position[2] + dz),
         ],
         yawDeg: snap4(obj.transform.yawDeg + op.deltaYawDeg),
@@ -311,7 +303,7 @@ export function applyAndValidatePatch(
           !member.editable ||
           member.category === 'fixed_structure' ||
           member.category === 'stage' ||
-          member.category === 'wheelchair_bay_frame'
+          (member.category === 'wheelchair_bay_frame' && !member.editable)
         ) {
           errors.push({
             code: 'FIXED_OBJECT_MODIFIED',
@@ -324,7 +316,7 @@ export function applyAndValidatePatch(
 
       if (groupMemberError) continue;
 
-      const deltaPos: [number, 0, number] = [dx, 0, dz];
+      const deltaPos: [number, number, number] = [dx, dy, dz];
       for (const memberId of memberIds) {
         const member = objectMap.get(memberId)!;
         const updatedTransform = applyGroupDeltaToMemberTransform(
@@ -364,7 +356,7 @@ export function applyAndValidatePatch(
       group.transform = {
         position: [
           snap4(group.transform.position[0] + dx),
-          snap4(group.transform.position[1]),
+          snap4(group.transform.position[1] + dy),
           snap4(group.transform.position[2] + dz),
         ],
         yawDeg: snap4(group.transform.yawDeg + op.deltaYawDeg),

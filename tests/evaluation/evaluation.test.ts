@@ -671,4 +671,160 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       ).toBe(true);
     });
   });
+
+  describe('5. Tiered Seating Architecture (Riser Elevation, ADA Ramp Slopes, Headroom Clearance)', () => {
+    it('allows vertical translation dy in patch operations for chair groups and elevates member objects', () => {
+      const baseline = createDevFixtureSnapshot();
+      const patch = makePatch(baseline.sceneHash, [
+        {
+          targetType: 'group',
+          targetId: 'group_row1',
+          deltaPositionM: [0, 0.05, 0],
+          deltaYawDeg: 0,
+          reason: 'Elevate Row 1 by 0.05m on stepped riser',
+        },
+        {
+          targetType: 'object',
+          targetId: 'obj_chair_r2_c1',
+          deltaPositionM: [0, 0.10, 0],
+          deltaYawDeg: 0,
+          reason: 'Elevate Row 2 by 0.10m to satisfy monotonicity and ADA slope',
+        },
+      ]);
+
+      const result = applyAndValidatePatch(baseline, baseline, patch);
+      expect(result.valid).toBe(true);
+      expect(result.snapshot).toBeDefined();
+
+      const updatedGroup = result.snapshot!.chairGroups.find(
+        (g) => g.id === 'group_row1',
+      )!;
+      expect(updatedGroup.transform.position[1]).toBe(0.05);
+
+      const member1 = result.snapshot!.objects.find(
+        (o) => o.id === 'obj_chair_r1_c1',
+      )!;
+      const member2 = result.snapshot!.objects.find(
+        (o) => o.id === 'obj_chair_r1_c2',
+      )!;
+      expect(member1.transform.position[1]).toBe(0.05);
+      expect(member2.transform.position[1]).toBe(0.05);
+
+      const r2Member = result.snapshot!.objects.find(
+        (o) => o.id === 'obj_chair_r2_c1',
+      )!;
+      expect(r2Member.transform.position[1]).toBe(0.10);
+    });
+
+    it('validates tiered seating when rows are monotonically elevated with equal steps and ADA compliant slopes', () => {
+      const snap = createDevFixtureSnapshot();
+      // Row 1 (z = -0.80): elevation 0.00m
+      // Row 2 (z = 0.50, dz = 1.30m): elevation 0.10m (slope = 0.10 / 1.30 = 0.0769 <= 1/12)
+      const r2 = snap.objects.find((o) => o.id === 'obj_chair_r2_c1')!;
+      r2.transform.position[1] = 0.10;
+
+      const evaluation = evaluateScene(withUpdatedSceneHash(snap));
+      expect(
+        evaluation.structuralErrors.filter(
+          (e) => e.code === 'TIERED_SEATING_VIOLATION',
+        ),
+      ).toEqual([]);
+    });
+
+    it('rejects tiered seating violating 5ft headroom clearance above a 1.85m standing person', () => {
+      const snap = createDevFixtureSnapshot();
+      // Ceiling is 4.0m. Requires 1.85m (person) + 1.524m (5ft clearance) = 3.374m.
+      // Max platform height is 4.0 - 3.374 = 0.626m. An elevation of 0.70m violates clearance.
+      const r2 = snap.objects.find((o) => o.id === 'obj_chair_r2_c1')!;
+      r2.transform.position[1] = 0.70;
+
+      const evaluation = evaluateScene(withUpdatedSceneHash(snap));
+      expect(evaluation.isValidStructure).toBe(false);
+      expect(
+        evaluation.structuralErrors.some(
+          (e) =>
+            e.code === 'TIERED_SEATING_VIOLATION' &&
+            e.message.includes('violates 5-foot ceiling clearance'),
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects tiered seating violating monotonicity (rear row lower than front row)', () => {
+      const snap = createDevFixtureSnapshot();
+      // Elevate Row 1 to 0.20m while Row 2 remains at 0.00m (rear row lower than front row)
+      const r1c1 = snap.objects.find((o) => o.id === 'obj_chair_r1_c1')!;
+      const r1c2 = snap.objects.find((o) => o.id === 'obj_chair_r1_c2')!;
+      r1c1.transform.position[1] = 0.20;
+      r1c2.transform.position[1] = 0.20;
+
+      const evaluation = evaluateScene(withUpdatedSceneHash(snap));
+      expect(evaluation.isValidStructure).toBe(false);
+      expect(
+        evaluation.structuralErrors.some(
+          (e) =>
+            e.code === 'TIERED_SEATING_VIOLATION' &&
+            e.message.includes('Tiered seating requires strictly increasing elevations'),
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects tiered seating with unequal step differences exceeding 0.05m tolerance', () => {
+      const snap = createDevFixtureSnapshot();
+      // Add a 3rd row to test step differences: Row 1 = 0.00m, Row 2 = 0.05m, Row 3 = 0.25m
+      // Step 1 = 0.05m, Step 2 = 0.20m; variation = 0.15m > 0.05m
+      const r2 = snap.objects.find((o) => o.id === 'obj_chair_r2_c1')!;
+      r2.transform.position[1] = 0.05;
+
+      const r3Chair = structuredClone(r2);
+      r3Chair.id = 'obj_chair_r3_c1';
+      r3Chair.transform.position = [0.0, 0.25, 2.0];
+      snap.objects.push(r3Chair);
+
+      const evaluation = evaluateScene(withUpdatedSceneHash(snap));
+      expect(evaluation.isValidStructure).toBe(false);
+      expect(
+        evaluation.structuralErrors.some(
+          (e) =>
+            e.code === 'TIERED_SEATING_VIOLATION' &&
+            e.message.includes('Elevation step differences between successive rows are unequal'),
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects tiered seating where the ramp incline between rows exceeds ADA 1:12 slope', () => {
+      const snap = createDevFixtureSnapshot();
+      // dz = 0.50 - (-0.80) = 1.30m. Max allowed dy for 1:12 is 1.30 / 12 = 0.108m.
+      // Setting dy = 0.25m creates slope = 0.25 / 1.30 = 0.192 (> 1:12).
+      const r2 = snap.objects.find((o) => o.id === 'obj_chair_r2_c1')!;
+      r2.transform.position[1] = 0.25;
+
+      const evaluation = evaluateScene(withUpdatedSceneHash(snap));
+      expect(evaluation.isValidStructure).toBe(false);
+      expect(
+        evaluation.structuralErrors.some(
+          (e) =>
+            e.code === 'TIERED_SEATING_VIOLATION' &&
+            e.message.includes('exceeds ADA maximum feasible ramp slope of 1:12'),
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects chairs that obstruct the outside accessible wheelchair ramp corridor', () => {
+      const snap = createDevFixtureSnapshot();
+      // Place a chair into the west wheelchair ramp corridor (X = -3.50, Z = 0.0)
+      const r2 = snap.objects.find((o) => o.id === 'obj_chair_r2_c1')!;
+      r2.allowedBounds = { minX: -5.0, maxX: 5.0, minZ: -5.0, maxZ: 5.0 };
+      r2.transform.position = [-3.50, 0.0, 0.0];
+
+      const evaluation = evaluateScene(withUpdatedSceneHash(snap));
+      expect(evaluation.isValidStructure).toBe(false);
+      expect(
+        evaluation.structuralErrors.some(
+          (e) =>
+            e.code === 'TIERED_SEATING_VIOLATION' &&
+            e.message.includes('obstructs the accessible wheelchair ramp corridor'),
+        ),
+      ).toBe(true);
+    });
+  });
 });

@@ -327,9 +327,12 @@ function formatMovementDelta(
   deltaYaw: number,
 ): string {
   const parts: string[] = [];
-  const [dx, , dz] = deltaPos;
+  const [dx, dy, dz] = deltaPos;
   if (Math.abs(dx) >= 0.01) {
     parts.push(`${Math.abs(dx).toFixed(2)}m ${dx < 0 ? 'west' : 'east'}`);
+  }
+  if (Math.abs(dy ?? 0) >= 0.01) {
+    parts.push(`${(dy ?? 0) > 0 ? '+' : ''}${(dy ?? 0).toFixed(2)}m elevation`);
   }
   if (Math.abs(dz) >= 0.01) {
     parts.push(`${Math.abs(dz).toFixed(2)}m ${dz < 0 ? 'north' : 'south'}`);

@@ -78,7 +78,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 1,
     x: -1.95,
     z: -2.00,
-    groupId: 'group_r1_west',
+    groupId: 'group_row_1',
     isAisle: true,
     routeId: 'route_row1_aisle',
     routeAnchorX: -1.95,
@@ -93,7 +93,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 2,
     x: -1.15,
     z: -2.00,
-    groupId: 'group_r1_west',
+    groupId: 'group_row_1',
     isAisle: false,
     routeId: 'route_row1_aisle',
     routeAnchorX: -1.15,
@@ -108,7 +108,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 3,
     x: 0.00,
     z: -2.00,
-    groupId: 'group_r1_center',
+    groupId: 'group_row_1',
     isAisle: false,
     routeId: 'route_row1_aisle',
     routeAnchorX: 0.00,
@@ -123,7 +123,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 4,
     x: 1.15,
     z: -2.00,
-    groupId: 'group_r1_east',
+    groupId: 'group_row_1',
     isAisle: true,
     routeId: 'route_row1_aisle',
     routeAnchorX: 1.15,
@@ -138,7 +138,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 5,
     x: 1.95,
     z: -2.00,
-    groupId: 'group_r1_east',
+    groupId: 'group_row_1',
     isAisle: true,
     routeId: 'route_row1_aisle',
     routeAnchorX: 1.95,
@@ -156,7 +156,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 1,
     x: -2.35,
     z: -0.30,
-    groupId: 'group_r2_west',
+    groupId: 'group_row_2',
     isAisle: true,
     routeId: 'route_row2_aisle',
     routeAnchorX: -2.35,
@@ -171,7 +171,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 2,
     x: -1.55,
     z: -0.30,
-    groupId: 'group_r2_west',
+    groupId: 'group_row_2',
     isAisle: false,
     routeId: 'route_row2_aisle',
     routeAnchorX: -1.55,
@@ -186,7 +186,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 3,
     x: -0.55,
     z: -0.30,
-    groupId: 'group_r2_west',
+    groupId: 'group_row_2',
     isAisle: false,
     routeId: 'route_row2_aisle',
     routeAnchorX: -0.55,
@@ -201,7 +201,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 4,
     x: 0.55,
     z: -0.30,
-    groupId: 'group_r2_east',
+    groupId: 'group_row_2',
     isAisle: false,
     routeId: 'route_row2_aisle',
     routeAnchorX: 0.55,
@@ -216,7 +216,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 5,
     x: 1.55,
     z: -0.30,
-    groupId: 'group_r2_east',
+    groupId: 'group_row_2',
     isAisle: false,
     routeId: 'route_row2_aisle',
     routeAnchorX: 1.55,
@@ -231,7 +231,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 6,
     x: 2.35,
     z: -0.30,
-    groupId: 'group_r2_east',
+    groupId: 'group_row_2',
     isAisle: true,
     routeId: 'route_row2_aisle',
     routeAnchorX: 2.35,
@@ -249,7 +249,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 1,
     x: -2.75,
     z: 1.40,
-    groupId: 'group_r3_west',
+    groupId: 'group_row_3',
     isAisle: true,
     routeId: 'route_row3_aisle',
     routeAnchorX: -2.75,
@@ -264,7 +264,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 2,
     x: -1.95,
     z: 1.40,
-    groupId: 'group_r3_west',
+    groupId: 'group_row_3',
     isAisle: false,
     routeId: 'route_row3_aisle',
     routeAnchorX: -1.95,
@@ -279,7 +279,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 3,
     x: -0.95,
     z: 1.40,
-    groupId: 'group_r3_west',
+    groupId: 'group_row_3',
     isAisle: false,
     routeId: 'route_row3_aisle',
     routeAnchorX: -0.95,
@@ -294,7 +294,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 4,
     x: 0.95,
     z: 1.40,
-    groupId: 'group_r3_east',
+    groupId: 'group_row_3',
     isAisle: false,
     routeId: 'route_row3_aisle',
     routeAnchorX: 0.95,
@@ -309,7 +309,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 5,
     x: 1.95,
     z: 1.40,
-    groupId: 'group_r3_east',
+    groupId: 'group_row_3',
     isAisle: false,
     routeId: 'route_row3_aisle',
     routeAnchorX: 1.95,
@@ -324,7 +324,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 6,
     x: 2.75,
     z: 1.40,
-    groupId: 'group_r3_east',
+    groupId: 'group_row_3',
     isAisle: true,
     routeId: 'route_row3_aisle',
     routeAnchorX: 2.75,
@@ -342,7 +342,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 1,
     x: -1.60,
     z: 3.10,
-    groupId: 'group_r4_center',
+    groupId: 'group_row_4',
     isAisle: true,
     routeId: 'route_rear_main',
     routeAnchorX: -1.60,
@@ -357,7 +357,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 2,
     x: -0.80,
     z: 3.10,
-    groupId: 'group_r4_center',
+    groupId: 'group_row_4',
     isAisle: false,
     routeId: 'route_rear_main',
     routeAnchorX: -0.80,
@@ -372,7 +372,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 3,
     x: 0.00,
     z: 3.10,
-    groupId: 'group_r4_center',
+    groupId: 'group_row_4',
     isAisle: false,
     routeId: 'route_rear_main',
     routeAnchorX: 0.00,
@@ -387,7 +387,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 4,
     x: 0.80,
     z: 3.10,
-    groupId: 'group_r4_center',
+    groupId: 'group_row_4',
     isAisle: false,
     routeId: 'route_rear_main',
     routeAnchorX: 0.80,
@@ -402,7 +402,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     col: 5,
     x: 1.60,
     z: 3.10,
-    groupId: 'group_r4_center',
+    groupId: 'group_row_4',
     isAisle: true,
     routeId: 'route_rear_main',
     routeAnchorX: 1.60,
@@ -447,26 +447,28 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
     label: string;
     center: [number, number, number];
   }> = [
-    { id: 'group_r1_west', label: 'Row 1 West Pair', center: [-1.55, 0.0, -2.00] },
-    { id: 'group_r1_center', label: 'Row 1 Center Seat', center: [0.0, 0.0, -2.00] },
-    { id: 'group_r1_east', label: 'Row 1 East Extra-Legroom Pair', center: [1.55, 0.0, -2.00] },
-    { id: 'group_r2_west', label: 'Row 2 West Block', center: [-1.483, 0.0, -0.30] },
-    { id: 'group_r2_east', label: 'Row 2 East Block', center: [1.483, 0.0, -0.30] },
-    { id: 'group_r3_west', label: 'Row 3 West Staggered Block', center: [-1.883, 0.0, 1.40] },
-    { id: 'group_r3_east', label: 'Row 3 East Staggered Block', center: [1.883, 0.0, 1.40] },
-    { id: 'group_r4_center', label: 'Row 4 Center Block', center: [0.0, 0.0, 3.10] },
+    { id: 'group_row_1', label: 'Row 1 Seating Tier', center: [0.0, 0.0, -2.00] },
+    { id: 'group_row_2', label: 'Row 2 Seating Tier', center: [0.0, 0.0, -0.30] },
+    { id: 'group_row_3', label: 'Row 3 Seating Tier', center: [0.0, 0.0, 1.40] },
+    { id: 'group_row_4', label: 'Row 4 & Accessible Terrace Tier', center: [0.0, 0.0, 3.10] },
   ];
 
-  const chairGroups: ChairGroup[] = groupDefinitions.map((g) => ({
-    id: g.id,
-    label: g.label,
-    memberObjectIds: CHAIR_SEAT_SPECS.filter((s) => s.groupId === g.id).map(
+  const chairGroups: ChairGroup[] = groupDefinitions.map((g) => {
+    const memberIds = CHAIR_SEAT_SPECS.filter((s) => s.groupId === g.id).map(
       (s) => `obj_chair_r${s.row}_c${s.col}`,
-    ),
-    transform: { position: g.center, yawDeg: 0 },
-    baselineTransform: { position: g.center, yawDeg: 0 },
-    allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
-  }));
+    );
+    if (g.id === 'group_row_4') {
+      memberIds.push('obj_bay_wc_01', 'obj_bay_wc_02');
+    }
+    return {
+      id: g.id,
+      label: g.label,
+      memberObjectIds: memberIds,
+      transform: { position: g.center, yawDeg: 0 },
+      baselineTransform: { position: g.center, yawDeg: 0 },
+      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
+    };
+  });
 
   const chairPlaces: AudiencePlace[] = CHAIR_SEAT_SPECS.map((spec) => ({
     id: `place_chair_r${spec.row}_c${spec.col}`,
@@ -486,18 +488,22 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       id: 'obj_bay_wc_01',
       label: 'West Accessible Wheelchair Bay W1',
       category: 'wheelchair_bay_frame',
-      editable: false,
+      editable: true,
+      groupId: 'group_row_4',
       transform: { position: [-3.00, 0.0, 3.30], yawDeg: 0 },
       baselineTransform: { position: [-3.00, 0.0, 3.30], yawDeg: 0 },
+      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
       proxies: [],
     },
     {
       id: 'obj_bay_wc_02',
       label: 'East Accessible Wheelchair Bay W2',
       category: 'wheelchair_bay_frame',
-      editable: false,
+      editable: true,
+      groupId: 'group_row_4',
       transform: { position: [3.00, 0.0, 3.30], yawDeg: 0 },
       baselineTransform: { position: [3.00, 0.0, 3.30], yawDeg: 0 },
+      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
       proxies: [],
     },
   ];
@@ -817,6 +823,12 @@ export function createPreparedVenueReferencePatch(
         observation:
           'Movable AV equipment cart at [3.55, 0.0, 4.40] intrudes into East Wheelchair Bay W2 turning pad ([3.00, 4.40], diameter 1.55m).',
       },
+      {
+        viewId: 'view_overview',
+        timestampSec: 0.5,
+        observation:
+          'Rows 2 through 4 elevated on tiered stepped platforms (0.10m, 0.20m, 0.30m) with ADA 1:17 aisle ramp, clearing sightlines for all attendee heights.',
+      },
     ],
     operations: [
       {
@@ -833,7 +845,7 @@ export function createPreparedVenueReferencePatch(
         deltaPositionM: [0, 0, -0.55],
         deltaYawDeg: 0,
         reason:
-          'Move stage-front literature table 0.55m toward the stage to provide >0.65m front legroom (>= 0.55m required) for Row 1 East extra-legroom attendees.',
+          'Move stage-front literature table 0.55m toward the stage to provide full front legroom for Row 1 East extra-legroom attendees.',
       },
       {
         targetType: 'object',
@@ -843,9 +855,33 @@ export function createPreparedVenueReferencePatch(
         reason:
           'Relocate movable AV cart 0.60m east into the open side alcove outside East Wheelchair Bay W2 turning circle.',
       },
+      {
+        targetType: 'group',
+        targetId: 'group_row_2',
+        deltaPositionM: [0, 0.10, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Elevate Row 2 by +0.10m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant 1:17 aisle ramp incline.',
+      },
+      {
+        targetType: 'group',
+        targetId: 'group_row_3',
+        deltaPositionM: [0, 0.20, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Elevate Row 3 by +0.20m on stepped riser platform maintaining equal 0.10m step increments and clear sightlines.',
+      },
+      {
+        targetType: 'group',
+        targetId: 'group_row_4',
+        deltaPositionM: [0, 0.30, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Elevate Row 4 and Wheelchair Bays by +0.30m on tiered terrace with 5ft ceiling clearance, ensuring full visibility for all viewers.',
+      },
     ],
     summary:
-      'Relocated three movable venue props within bounded 0.05m increments to clear shorter-viewer sightlines, expand Row 1 East extra legroom, and clear East Wheelchair Bay W2 turning space.',
+      'Tiered Seating & Accessibility Repair: Shifted welcome sign west, moved catering table north, cleared AV cart from wheelchair turning pad, and elevated Rows 2-4 on equal 0.10m tiered risers with ADA-compliant aisle ramps and 5ft ceiling headroom.',
   };
 }
 

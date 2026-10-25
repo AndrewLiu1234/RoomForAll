@@ -629,5 +629,153 @@ export function validateSceneStructure(
     }
   }
 
+  // 6. Tiered Seating Architecture & Accessibility Validation
+  const tieredErrors = validateTieredSeating(snapshot);
+  errors.push(...tieredErrors);
+
+  return errors;
+}
+
+/**
+ * Validates tiered seating invariants:
+ * 1. Headroom Clearance: 5ft (1.524m) clearance above the head of a 1.85m standing person on any elevated tier.
+ * 2. Monotonicity: Rows further from the screen along +Z must have strictly higher elevation than preceding rows.
+ * 3. Equal Step Differences: Elevation increments between successive rows must be approximately equal (within 0.05m).
+ * 4. ADA Ramp Slope: Incline between rows must not exceed 1:12 (0.0833) for feasible wheelchair/crutch access.
+ */
+export function validateTieredSeating(snapshot: SceneSnapshot): StructuralError[] {
+  const errors: StructuralError[] = [];
+  const ceilingY = snapshot.roomBounds.max[1];
+  const STANDING_PERSON_HEIGHT_M = 1.85;
+  const FIVE_FEET_CLEARANCE_M = 1.524;
+  const REQUIRED_TOTAL_HEADROOM_M = STANDING_PERSON_HEIGHT_M + FIVE_FEET_CLEARANCE_M; // 3.374m
+  const MAX_ADA_RAMP_SLOPE = 1 / 12; // 0.08333
+
+  // 1. Headroom clearance check for every audience place / movable chair
+  for (const obj of snapshot.objects) {
+    if (obj.category !== 'movable_chair' && obj.category !== 'wheelchair_bay_frame') {
+      continue;
+    }
+    const elevationY = obj.transform.position[1];
+    if (elevationY + REQUIRED_TOTAL_HEADROOM_M > ceilingY + NUMERIC_EPSILON) {
+      errors.push({
+        code: 'TIERED_SEATING_VIOLATION',
+        message: `Object ${obj.id} elevation (${elevationY.toFixed(2)}m) violates 5-foot ceiling clearance for a standing person (requires ${REQUIRED_TOTAL_HEADROOM_M.toFixed(3)}m below ${ceilingY.toFixed(2)}m ceiling; maximum allowed platform height is ${(ceilingY - REQUIRED_TOTAL_HEADROOM_M).toFixed(2)}m).`,
+        targetId: obj.id,
+      });
+    }
+  }
+
+  // 2. Identify and cluster audience rows along depth Z (from screen at -Z to rear at +Z)
+  const chairObjects = snapshot.objects.filter(
+    (o) => o.category === 'movable_chair' || o.category === 'wheelchair_bay_frame',
+  );
+  if (chairObjects.length === 0) return errors;
+
+  // Cluster objects into rows by Z coordinate with 0.50m threshold
+  const sortedByZ = [...chairObjects].sort(
+    (a, b) => a.transform.position[2] - b.transform.position[2],
+  );
+
+  interface RowCluster {
+    nominalZ: number;
+    objects: SceneObject[];
+    averageY: number;
+  }
+
+  const rowClusters: RowCluster[] = [];
+  for (const obj of sortedByZ) {
+    const oz = obj.transform.position[2];
+    const existing = rowClusters.find((r) => Math.abs(r.nominalZ - oz) <= 0.50);
+    if (existing) {
+      existing.objects.push(obj);
+      existing.nominalZ =
+        existing.objects.reduce((sum, o) => sum + o.transform.position[2], 0) /
+        existing.objects.length;
+    } else {
+      rowClusters.push({
+        nominalZ: oz,
+        objects: [obj],
+        averageY: 0,
+      });
+    }
+  }
+
+  for (const row of rowClusters) {
+    row.averageY =
+      row.objects.reduce((sum, o) => sum + o.transform.position[1], 0) /
+      row.objects.length;
+  }
+
+  // 2b. Wheelchair Ramp Clearance: Ensure no audience chairs obstruct the outside wheelchair ramp corridors
+  for (const obj of snapshot.objects) {
+    if (obj.category !== 'movable_chair') continue;
+    const [ox, , oz] = obj.transform.position;
+    if (
+      (ox <= -3.20 && ox >= -4.20 && oz >= -2.5 && oz <= 3.5) ||
+      (ox >= 3.20 && ox <= 4.20 && oz >= -2.5 && oz <= 3.5)
+    ) {
+      errors.push({
+        code: 'TIERED_SEATING_VIOLATION',
+        message: `Chair ${obj.id} at [${ox.toFixed(2)}, ${oz.toFixed(2)}] obstructs the accessible wheelchair ramp corridor.`,
+        targetId: obj.id,
+      });
+    }
+  }
+
+  // Check if tiered seating is active in the auditorium (any row elevated above 0.01m)
+  const isTiered = rowClusters.some((r) => r.averageY > 0.01);
+  if (!isTiered || rowClusters.length <= 1) {
+    return errors;
+  }
+
+  // 3. Monotonicity: each row further from screen must be strictly higher than the row before it
+  for (let i = 0; i < rowClusters.length - 1; i++) {
+    const front = rowClusters[i]!;
+    const rear = rowClusters[i + 1]!;
+    if (rear.averageY <= front.averageY + NUMERIC_EPSILON) {
+      errors.push({
+        code: 'TIERED_SEATING_VIOLATION',
+        message: `Row at Z=${rear.nominalZ.toFixed(2)}m (elevation ${rear.averageY.toFixed(2)}m) is not higher than preceding row at Z=${front.nominalZ.toFixed(2)}m (elevation ${front.averageY.toFixed(2)}m). Tiered seating requires strictly increasing elevations.`,
+        targetId: rear.objects[0]?.id,
+      });
+    }
+  }
+
+  // 4. Equal Step Differences: difference between successive rows must be approximately equal
+  const stepDeltas: number[] = [];
+  for (let i = 0; i < rowClusters.length - 1; i++) {
+    stepDeltas.push(rowClusters[i + 1]!.averageY - rowClusters[i]!.averageY);
+  }
+
+  if (stepDeltas.length >= 2) {
+    const minStep = Math.min(...stepDeltas);
+    const maxStep = Math.max(...stepDeltas);
+    if (maxStep - minStep > 0.05 + NUMERIC_EPSILON) {
+      errors.push({
+        code: 'TIERED_SEATING_VIOLATION',
+        message: `Elevation step differences between successive rows are unequal (min step ${minStep.toFixed(2)}m, max step ${maxStep.toFixed(2)}m; variation ${(maxStep - minStep).toFixed(2)}m exceeds 0.05m tolerance).`,
+      });
+    }
+  }
+
+  // 5. Feasible Ramp Incline (ADA 1:12 slope limit) between successive rows
+  for (let i = 0; i < rowClusters.length - 1; i++) {
+    const front = rowClusters[i]!;
+    const rear = rowClusters[i + 1]!;
+    const dz = Math.abs(rear.nominalZ - front.nominalZ);
+    const dy = Math.max(0, rear.averageY - front.averageY);
+    if (dz > 0.1) {
+      const slope = dy / dz;
+      if (slope > MAX_ADA_RAMP_SLOPE + 0.005) {
+        errors.push({
+          code: 'TIERED_SEATING_VIOLATION',
+          message: `Incline between rows at Z=${front.nominalZ.toFixed(2)}m and Z=${rear.nominalZ.toFixed(2)}m (slope ${slope.toFixed(3)}, or 1:${(1 / slope).toFixed(1)}) exceeds ADA maximum feasible ramp slope of 1:12 (0.083).`,
+          targetId: rear.objects[0]?.id,
+        });
+      }
+    }
+  }
+
   return errors;
 }

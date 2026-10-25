@@ -11,10 +11,10 @@
 ## 2. Frozen Asset & Baseline Identifiers
 
 - **Scene ID:** `prepared_community_hall_24_v1`
-- **Deterministic Scene Hash:** `vp_1bd88b936a68191b`
-- **GLB Asset Path:** `/venue/prepared-venue.glb` (`7120` bytes)
-- **GLB Asset Hash:** `vp_667259a79861efe9`
-- **Total Audience Places:** `24` (`22` movable chairs across `8` groups + `2` fixed wheelchair bays)
+- **Deterministic Scene Hash:** `vp_1c414b29665b342a`
+- **GLB Asset Path:** `/venue/prepared-venue.glb` (`7080` bytes)
+- **GLB Asset Hash:** `vp_d8a8f02bff7e5310`
+- **Total Audience Places:** `24` (`22` movable chairs across `4` groups + `2` fixed wheelchair bays)
 - **Frozen Roster:** `24` attendees across `4` profiles (`reference_adult`, `shorter_seated`, `wheelchair_user`, `extra_legroom`)
 
 ## 3. Modeled Geometry & Baseline Audit Scenario
