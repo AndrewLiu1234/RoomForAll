@@ -422,18 +422,60 @@ function buildAgentEgressWaypoints(
     for (const exit of candidateExits) {
       // Exclude high terrace exit for lower rows to prevent climbing backwards
       if (exit.id === 'exit_wheelchair_terrace') continue;
-      const dist = Math.hypot(
+      const distFromSeat = Math.hypot(
         exit.position[0] - seatPos[0],
         exit.position[1] - seatPos[1],
       );
+      const distFromAnchor = Math.hypot(
+        exit.position[0] - place.routeAnchorPoint[0],
+        exit.position[1] - place.routeAnchorPoint[1],
+      );
       const widthPenalty =
         exit.effectiveWidthM > 0 ? 1.2 / exit.effectiveWidthM : 10;
-      const score = dist * widthPenalty;
+      const score = (distFromSeat * 0.4 + distFromAnchor * 0.6) * widthPenalty;
       if (score < bestScore) {
         bestScore = score;
         bestExit = exit;
       }
     }
+  }
+
+  const isUploadedGlb =
+    snapshot.sceneId.startsWith('glb_') || snapshot.sceneId.includes('classroom');
+
+  if (isUploadedGlb) {
+    const isEastSideExit = bestExit.position[0] > 1.8;
+    const isWestSideExit = bestExit.position[0] < -1.8;
+    const anchor = place.routeAnchorPoint;
+
+    const rowAislePoint: Vec2 = [seatPos[0], anchor[1]];
+    if (Math.hypot(rowAislePoint[0] - seatPos[0], rowAislePoint[1] - seatPos[1]) > 0.15) {
+      waypoints.push(rowAislePoint);
+    }
+
+    if (isEastSideExit && seatPos[0] >= -0.4) {
+      const eastAisleX = Math.min(
+        snapshot.roomBounds.max[0] - 0.85,
+        Math.max(2.4, bestExit.position[0] - 0.35),
+      );
+      waypoints.push([eastAisleX, anchor[1]]);
+      waypoints.push([bestExit.position[0], bestExit.position[1]]);
+      return { waypoints, targetExitId: bestExit.id };
+    }
+
+    if (isWestSideExit && bestExit.position[1] < 0) {
+      const westAisleX = Math.max(
+        snapshot.roomBounds.min[0] + 0.85,
+        Math.min(-2.4, bestExit.position[0] + 0.35),
+      );
+      waypoints.push([westAisleX, anchor[1]]);
+      waypoints.push([bestExit.position[0], bestExit.position[1]]);
+      return { waypoints, targetExitId: bestExit.id };
+    }
+
+    waypoints.push([anchor[0], anchor[1]]);
+    waypoints.push([bestExit.position[0], bestExit.position[1]]);
+    return { waypoints, targetExitId: bestExit.id };
   }
 
   // 2. Extrication: step forward into the foot-aisle on the SAME tier platform (never backward onto higher tier)
@@ -453,23 +495,21 @@ function buildAgentEgressWaypoints(
     return { waypoints, targetExitId: bestExit.id };
   }
 
-  // 4. Routing via Outside Aisle Ramps (Down to Low-Level Exits)
-  // Outside ramp corridors are at X = -3.65 (West) and X = +3.65 (East)
-  const isWest = seatPos[0] < 0 || bestExit.position[0] < 0;
-  const rampX = isWest ? -3.65 : 3.65;
-  const rampFloorZ = -2.35; // Front floor landing of the ramp
+  // 4. Routing to Exit Corridor
+  const isWest = bestExit.position[0] < 0;
+  const aisleX = isWest
+    ? Math.max(snapshot.roomBounds.min[0] + 0.65, Math.min(-3.65, bestExit.position[0]))
+    : Math.min(snapshot.roomBounds.max[0] - 0.65, Math.max(3.65, bestExit.position[0]));
 
-  if (!isRow1) {
-    // Elevated tiers (Row 2, 3, 4): Walk laterally on current platform to the ramp corridor
-    waypoints.push([rampX, sameTierAisleZ]);
-    // Walk down along and on top of the ramp to the front ground floor landing
-    waypoints.push([rampX, rampFloorZ]);
-  } else {
-    // Row 1 is already at the base floor level: step out to the front corridor
-    waypoints.push([rampX, rampFloorZ]);
+  // Walk laterally on current platform to the aisle / ramp corridor
+  waypoints.push([aisleX, sameTierAisleZ]);
+
+  // Walk along the aisle / ramp corridor directly to the exit door's Z
+  if (Math.abs(bestExit.position[1] - sameTierAisleZ) > 0.3) {
+    waypoints.push([aisleX, bestExit.position[1]]);
   }
 
-  // 5. From the front floor landing, walk directly to the chosen exit portal
+  // From the corridor, walk directly through the chosen exit portal
   waypoints.push([bestExit.position[0], bestExit.position[1]]);
   return { waypoints, targetExitId: bestExit.id };
 }
@@ -620,6 +660,20 @@ export function simulateEvacuation(
 
     // Check if all agents have exited
     if (agents.length > 0 && agents.every((a) => a.state === 'exited')) {
+      const frameAgents: Record<string, EvacuationAgentFrameState> = {};
+      for (const ag of agents) {
+        frameAgents[ag.attendeeId] = {
+          position: [
+            Number(ag.position[0].toFixed(3)),
+            Number(ag.position[1].toFixed(3)),
+          ],
+          yawDeg: Number(ag.yawDeg.toFixed(1)),
+          speedMps: 0,
+          state: 'exited',
+          targetExitId: ag.targetExitId,
+        };
+      }
+      frames.push({ timeSec: simTimeSec, agents: frameAgents });
       break;
     }
 
@@ -642,7 +696,7 @@ export function simulateEvacuation(
       const distToWp = Math.hypot(dx, dz);
 
       const isFinalExitWp = ag.currentWaypointIdx >= ag.waypoints.length - 1;
-      if (distToWp < (isFinalExitWp ? 0.42 : 0.28)) {
+      if (distToWp < (isFinalExitWp ? 0.50 : 0.28)) {
         if (isFinalExitWp) {
           ag.state = 'exited';
           ag.exitTimeSec = simTimeSec;
@@ -662,8 +716,10 @@ export function simulateEvacuation(
       const desiredDirX = dirX / dirLen;
       const desiredDirZ = dirZ / dirLen;
 
-      // Determine whether agent is still extricating from their seat row (before reaching aisle anchor)
-      const isExtricating = ag.currentWaypointIdx <= 1 && Math.abs(ag.position[0] - ag.seatPos[0]) < 1.8;
+      // Determine whether agent is still extricating from their seat row (before clearing chair and local obstruction)
+      const isExtricating =
+        ag.currentWaypointIdx <= 1 &&
+        Math.abs(ag.position[0] - ag.seatPos[0]) < 0.48;
       let targetSpeed = isExtricating ? ag.extricationSpeedMps : ag.baseSpeedMps;
 
       // Compute social repulsion & queueing slowdown from nearby active agents

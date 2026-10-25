@@ -11,7 +11,7 @@
 ## 2. Frozen Asset & Baseline Identifiers
 
 - **Scene ID:** `prepared_community_hall_24_v1`
-- **Deterministic Scene Hash:** `vp_c63388a75b2bceb9`
+- **Deterministic Scene Hash:** `vp_ff15d29aa1200205`
 - **GLB Asset Path:** `/venue/prepared-venue.glb` (`7080` bytes)
 - **GLB Asset Hash:** `vp_d8a8f02bff7e5310`
 - **Total Audience Places:** `24` (`22` movable chairs across `4` groups + `2` fixed wheelchair bays)

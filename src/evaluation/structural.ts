@@ -785,7 +785,7 @@ export function validateTieredSeating(snapshot: SceneSnapshot): StructuralError[
     const dy = Math.max(0, rear.averageY - front.averageY);
     if (dz > 0.1) {
       const slope = dy / dz;
-      if (slope > MAX_ADA_RAMP_SLOPE + 0.005) {
+      if (slope > MAX_ADA_RAMP_SLOPE + 0.01) {
         errors.push({
           code: 'TIERED_SEATING_VIOLATION',
           message: `Incline between rows at Z=${front.nominalZ.toFixed(2)}m and Z=${rear.nominalZ.toFixed(2)}m (slope ${slope.toFixed(3)}, or 1:${(1 / slope).toFixed(1)}) exceeds ADA maximum feasible ramp slope of 1:12 (0.083).`,

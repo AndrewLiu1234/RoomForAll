@@ -261,9 +261,9 @@ export function createLocalFixtureRepairPreviewRun(
   );
 
   // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues
+  // Tries horizontal moves FIRST before falling back to removal ([0, -0.4, 0])!
   if (!hasDevSign) {
     const candidateDeltas: Array<[number, number, number]> = [
-      [0, -0.4, 0], // Remove / clear blocking Flaw_* or Obs_* obstruction
       [-0.6, 0, 0],
       [0.6, 0, 0],
       [-0.55, 0, 0],
@@ -274,6 +274,7 @@ export function createLocalFixtureRepairPreviewRun(
       [0.6, 0, -0.55],
       [-0.6, 0, 0.55],
       [0.6, 0, 0.55],
+      [0, -0.4, 0], // Remove / clear obstruction only if moving doesn't suffice or for unmovable stage/rigging flaws
     ];
     const editableProps = baselineSnapshot.objects.filter(
       (o) => o.editable && o.category === 'movable_prop',
@@ -303,12 +304,32 @@ export function createLocalFixtureRepairPreviewRun(
 
     for (const targetObj of candidateTargets) {
       if (ops.length >= 6) break;
+      // Once all attendees have 0 unmet requirements, save remaining patch slots for relocating aisle props
+      if (
+        targetObj.category === 'movable_chair' &&
+        currentEval.comparison.attendeesWithUnmetRequirements === 0
+      ) {
+        continue;
+      }
+      const lower = targetObj.id.toLowerCase();
+      // Heavy overhead/stage/column flaws (rigging bar, stage totem, teleprompter tower) must be removed;
+      // floor props & chairs try horizontal moves first!
+      const mustRemoveProp =
+        lower.includes('rigging') ||
+        lower.includes('totem') ||
+        lower.includes('teleprompter') ||
+        lower.includes('column') ||
+        lower.includes('framing');
+
       let bestTargetOp: LayoutPatch['operations'][number] | null = null;
       let bestTargetSnap = currentSnap;
       let bestTargetEval = currentEval;
 
-      for (const delta of candidateDeltas) {
-        // Only apply vertical removal [0, -0.4, 0] to movable_prop obstructions
+      const deltasToTry = mustRemoveProp
+        ? ([[0, -0.4, 0]] as Array<[number, number, number]>)
+        : candidateDeltas;
+
+      for (const delta of deltasToTry) {
         if (delta[1] < 0 && targetObj.category !== 'movable_prop') continue;
         const isRemoval = delta[1] < -0.15;
         const trialPatch: LayoutPatch = {
@@ -341,7 +362,14 @@ export function createLocalFixtureRepairPreviewRun(
             bestTargetOp = trialPatch.operations[0]!;
             bestTargetSnap = val.snapshot;
             bestTargetEval = nextEval;
-            if (isRemoval) break; // Prefer complete obstruction removal when it improves sightlines!
+            // If a horizontal move cleared all failed requirements for the obstructed viewer, keep the move!
+            if (
+              !isRemoval &&
+              nextEval.comparison.attendeesWithUnmetRequirements <
+                currentEval.comparison.attendeesWithUnmetRequirements
+            ) {
+              break;
+            }
           }
         }
       }
@@ -353,27 +381,51 @@ export function createLocalFixtureRepairPreviewRun(
       }
     }
 
-    // Also clear any remaining Flaw_* or Obs_* visual/aisle clutter within the 6-operation patch budget
+    // For any remaining patch slots (up to 6), relocate movable aisle props (`Welcome_Sign`, `Catering_Table`, `Mobile_AV_Cart`)
+    // laterally out of the aisle FIRST rather than removing them, and remove only heavy structural flaws!
     const targetedSet = new Set(ops.map((o) => o.targetId));
-    for (const prop of editableProps) {
+    const remainingProps = [...editableProps].sort((a, b) => {
+      const aMovable =
+        /welcome_sign|catering_table|av_cart|easel/i.test(a.id) ? 0 : 1;
+      const bMovable =
+        /welcome_sign|catering_table|av_cart|easel/i.test(b.id) ? 0 : 1;
+      return aMovable - bMovable;
+    });
+    for (const prop of remainingProps) {
       if (ops.length >= 6) break;
       if (targetedSet.has(prop.id)) continue;
       const lower = prop.id.toLowerCase();
-      if (lower.includes('flaw') || lower.startsWith('obs_')) {
-        const removalOp: LayoutPatch['operations'][number] = {
+      const shouldMoveAisleProp =
+        lower.includes('welcome_sign') ||
+        lower.includes('catering_table') ||
+        lower.includes('av_cart') ||
+        lower.includes('easel');
+      if (
+        shouldMoveAisleProp ||
+        lower.includes('flaw') ||
+        lower.startsWith('obs_')
+      ) {
+        const delta: [number, number, number] = shouldMoveAisleProp
+          ? [-0.6, 0, -0.55]
+          : [0, -0.4, 0];
+        const propOp: LayoutPatch['operations'][number] = {
           targetType: 'object',
           targetId: prop.id,
-          deltaPositionM: [0, -0.4, 0],
+          deltaPositionM: delta,
           deltaYawDeg: 0,
-          reason: `Remove ${prop.id} clutter to open auditorium sightlines and emergency egress corridors.`,
+          reason: shouldMoveAisleProp
+            ? `Relocate ${prop.id} by [${delta.join(', ')}]m to widen the side aisle egress corridor.`
+            : `Remove ${prop.id} obstruction to open auditorium sightlines and emergency egress corridors.`,
         };
         const trialPatch: LayoutPatch = {
           contractVersion: CONTRACT_VERSION,
           runId: 'preview_custom_glb',
           parentSceneHash: currentSnap.sceneHash,
           diagnosis: [],
-          operations: [removalOp],
-          summary: `Removed ${prop.id}.`,
+          operations: [propOp],
+          summary: shouldMoveAisleProp
+            ? `Relocated ${prop.id}.`
+            : `Removed ${prop.id}.`,
         };
         const val = applyAndValidatePatch(
           baselineSnapshot,
@@ -381,7 +433,7 @@ export function createLocalFixtureRepairPreviewRun(
           trialPatch,
         );
         if (val.valid && val.snapshot) {
-          ops.push(removalOp);
+          ops.push(propOp);
           targetedSet.add(prop.id);
           currentSnap = val.snapshot;
           currentEval = evaluateSceneWithFallback(val.snapshot);
