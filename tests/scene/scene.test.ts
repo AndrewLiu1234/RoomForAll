@@ -30,6 +30,7 @@ import {
   buildVenueThreeScene,
   captureEvidence,
   computeInitialOrbit,
+  createArticulatedAvatarMesh,
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
   disposeVenueScene,
@@ -763,6 +764,40 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(outsideRamp).toBeDefined();
 
     disposeVenueScene(built.scene);
+  });
+
+  it('elevates wheelchair wheels and frame according to the platform elevation it is standing on', () => {
+    const snap = createPreparedVenueSnapshot();
+    // Elevate wheelchair bay W2 to 0.30m (att_wheelchair_01 is assigned to place_bay_wc_02)
+    const bayObj = snap.objects.find((o) => o.id === 'obj_bay_wc_02')!;
+    bayObj.transform.position[1] = 0.30;
+
+    const torsoBox = getAttendeeTorsoProxyWorldBox(snap, 'att_wheelchair_01');
+    expect(torsoBox.centerWorld[1]).toBeCloseTo(0.30 + 1.25 / 2, 3); // 0.925m
+
+    const { rootMesh } = createArticulatedAvatarMesh({
+      attendeeId: 'att_wheelchair_01',
+      profileId: 'wheelchair_user',
+      placeId: 'place_bay_wc_01',
+      torsoBox,
+      baseColorHex: 0x3b82f6,
+    });
+
+    const wcAssembly = rootMesh.getObjectByName('avatar_wheelchair_assembly');
+    expect(wcAssembly).toBeDefined();
+
+    const leftWheel = rootMesh.getObjectByName('avatar_wheel_left') as THREE.Group;
+    expect(leftWheel).toBeDefined();
+
+    // Wheel position relative to rootMesh (which is at Y = 0.925):
+    // floorOffsetY = -1.25 * 0.5 = -0.625
+    // wheelPivot.y = floorOffsetY + 0.29 = -0.335
+    // In world coordinates: 0.925 + (-0.335) = 0.59m (center of wheel)
+    // Bottom of wheel: 0.59 - 0.29 = 0.30m (rests exactly on the 0.30m elevated platform!)
+    const wheelCenterWorldY = rootMesh.position.y + leftWheel.position.y;
+    expect(wheelCenterWorldY).toBeCloseTo(0.30 + 0.29, 3);
+    const wheelBottomWorldY = wheelCenterWorldY - 0.29;
+    expect(wheelBottomWorldY).toBeCloseTo(0.30, 3);
   });
 
   it('passes Stream B real evaluateScene, applyAndValidatePatch, and compareEvaluations with 24/24 clear-and-usable places after reference patch', () => {

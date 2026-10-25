@@ -2021,6 +2021,44 @@
       "widthM": 0.82
     }
   ],
+  "exits": [
+    {
+      "id": "exit_main_west",
+      "label": "Main West Entrance / Exit (Low Level)",
+      "position": [
+        -4.65,
+        -1.8
+      ],
+      "elevationM": 0,
+      "widthM": 1.4,
+      "yawDeg": -90,
+      "isEmergencyExit": false
+    },
+    {
+      "id": "exit_emergency_east",
+      "label": "East Emergency Exit (Low Level)",
+      "position": [
+        5.35,
+        1.2
+      ],
+      "elevationM": 0,
+      "widthM": 1.25,
+      "yawDeg": 90,
+      "isEmergencyExit": true
+    },
+    {
+      "id": "exit_wheelchair_terrace",
+      "label": "Rear Wheelchair Terrace Emergency Exit (High Level)",
+      "position": [
+        0,
+        5.8
+      ],
+      "elevationM": 0.3,
+      "widthM": 1.6,
+      "yawDeg": 0,
+      "isEmergencyExit": true
+    }
+  ],
   "profiles": {
     "reference_adult": {
       "id": "reference_adult",
@@ -2241,5 +2279,5 @@
       "assignedPlaceId": "place_bay_wc_01"
     }
   ],
-  "sceneHash": "vp_1c414b29665b342a"
+  "sceneHash": "vp_c63388a75b2bceb9"
 }

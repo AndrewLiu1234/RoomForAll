@@ -4,11 +4,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   INSPECTION_CAMERA,
   getAttendeeCameraPose,
+  withUpdatedSceneHash,
   type Evaluation,
   type EvacuationMode,
   type ProfileId,
 } from '../shared/index.js';
-import { simulateEvacuation } from '../evaluation/index.js';
+import { getVenueExitPortals, simulateEvacuation } from '../evaluation/index.js';
 import {
   disposeVenueScene,
   getGlbAlignmentForScene,
@@ -83,16 +84,53 @@ export function VenueViewportStage({
   const [evacMode, setEvacMode] = useState<EvacuationMode>('none');
   const [evacTimeSec, setEvacTimeSec] = useState<number>(0);
   const [isPlayingEvac, setIsPlayingEvac] = useState<boolean>(false);
+  const [exitOverrides, setExitOverrides] = useState<
+    Record<string, { x?: number; z?: number }>
+  >({});
+  const [showExitOptimizer, setShowExitOptimizer] = useState<boolean>(false);
   const [evacCounts, setEvacCounts] = useState<{
     exitedCount: number;
     queuingCount: number;
     activeCount: number;
   }>({ exitedCount: 0, queuingCount: 0, activeCount: snapshot.roster.length });
 
+  const effectiveSnapshot = useMemo(() => {
+    if (Object.keys(exitOverrides).length === 0) return snapshot;
+    const cloned = structuredClone(snapshot);
+    if (!cloned.exits) {
+      cloned.exits = structuredClone(getVenueExitPortals(cloned));
+    }
+    for (const [id, override] of Object.entries(exitOverrides)) {
+      const exit = cloned.exits.find((e) => e.id === id);
+      if (exit) {
+        if (typeof override.x === 'number') exit.position[0] = override.x;
+        if (typeof override.z === 'number') exit.position[1] = override.z;
+      }
+    }
+    return withUpdatedSceneHash(cloned);
+  }, [snapshot, exitOverrides]);
+
+  const rawPortals = useMemo(
+    () => getVenueExitPortals(effectiveSnapshot),
+    [effectiveSnapshot],
+  );
+  const westExitZ =
+    exitOverrides.exit_main_west?.z ??
+    rawPortals.find((p) => p.id === 'exit_main_west')?.position[1] ??
+    -1.8;
+  const eastExitZ =
+    exitOverrides.exit_emergency_east?.z ??
+    rawPortals.find((p) => p.id === 'exit_emergency_east')?.position[1] ??
+    1.2;
+  const terraceExitX =
+    exitOverrides.exit_wheelchair_terrace?.x ??
+    rawPortals.find((p) => p.id === 'exit_wheelchair_terrace')?.position[0] ??
+    0.0;
+
   const evacSimResult = useMemo(() => {
     if (evacMode === 'none') return null;
-    return simulateEvacuation(snapshot, evacMode);
-  }, [snapshot, evacMode]);
+    return simulateEvacuation(effectiveSnapshot, evacMode);
+  }, [effectiveSnapshot, evacMode]);
 
   const [orbitAngles, setOrbitAngles] = useState<{
     azimuthRad: number;
@@ -402,7 +440,7 @@ export function VenueViewportStage({
 
     disposeVenueScene(scene);
 
-    populateThreeSceneFromSnapshot(scene, snapshot, {
+    populateThreeSceneFromSnapshot(scene, effectiveSnapshot, {
       hideAttendeeId:
         viewMode === 'attendee_pov' ? selectedAttendeeId : undefined,
       forBlindEvidenceCapture: false,
@@ -681,7 +719,7 @@ export function VenueViewportStage({
       cancelled = true;
     };
   }, [
-    snapshot,
+    effectiveSnapshot,
     selectedAttendeeId,
     selectedAttendee,
     selectedEmptyPlaceId,
@@ -1196,7 +1234,202 @@ export function VenueViewportStage({
               {evacSimResult.totalExitCount} · T_evac{' '}
               {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
             </span>
+
+            <div className="vp-divider-v" />
+
+            <button
+              type="button"
+              className="vp-btn"
+              style={{
+                fontSize: '0.72rem',
+                padding: '3px 8px',
+                background: showExitOptimizer ? 'var(--accent-primary)' : undefined,
+                color: showExitOptimizer ? '#fff' : undefined,
+              }}
+              onClick={() => setShowExitOptimizer((p) => !p)}
+            >
+              🚪 {showExitOptimizer ? 'Close Optimizer' : 'Optimize Exits'}
+            </button>
           </div>
+
+          {/* Interactive Exit Position Optimizer Drawer */}
+          {showExitOptimizer && (
+            <div
+              className="glass"
+              style={{
+                marginTop: '8px',
+                background: 'rgba(15, 23, 42, 0.94)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '12px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                minWidth: '380px',
+                pointerEvents: 'auto',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span
+                  style={{
+                    fontWeight: 600,
+                    fontSize: '0.82rem',
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  🚪 Exit Position Optimizer
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: '0.74rem',
+                    color: 'var(--accent-primary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  T_evac: {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
+                </span>
+              </div>
+
+              {/* West Low-Level Exit (Door Z along West Wall) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: '0.72rem',
+                  }}
+                >
+                  <span>West Low-Level Exit (Door Z)</span>
+                  <span className="mono">{westExitZ.toFixed(2)}m</span>
+                </div>
+                <input
+                  type="range"
+                  min={-3.5}
+                  max={1.5}
+                  step={0.1}
+                  value={westExitZ}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setExitOverrides((prev) => ({
+                      ...prev,
+                      exit_main_west: { ...(prev.exit_main_west ?? {}), z: val },
+                    }));
+                  }}
+                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                />
+              </div>
+
+              {/* East Low-Level Exit (Door Z along East Wall) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: '0.72rem',
+                  }}
+                >
+                  <span>East Low-Level Exit (Door Z)</span>
+                  <span className="mono">{eastExitZ.toFixed(2)}m</span>
+                </div>
+                <input
+                  type="range"
+                  min={-1.5}
+                  max={3.5}
+                  step={0.1}
+                  value={eastExitZ}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setExitOverrides((prev) => ({
+                      ...prev,
+                      exit_emergency_east: {
+                        ...(prev.exit_emergency_east ?? {}),
+                        z: val,
+                      },
+                    }));
+                  }}
+                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                />
+              </div>
+
+              {/* Rear Wheelchair Terrace Exit (Door X along Terrace) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: '0.72rem',
+                  }}
+                >
+                  <span>Wheelchair Terrace Exit (Door X)</span>
+                  <span className="mono">{terraceExitX.toFixed(2)}m</span>
+                </div>
+                <input
+                  type="range"
+                  min={-3.0}
+                  max={3.0}
+                  step={0.1}
+                  value={terraceExitX}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setExitOverrides((prev) => ({
+                      ...prev,
+                      exit_wheelchair_terrace: {
+                        ...(prev.exit_wheelchair_terrace ?? {}),
+                        x: val,
+                      },
+                    }));
+                  }}
+                  style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '8px',
+                  marginTop: '4px',
+                }}
+              >
+                <button
+                  type="button"
+                  className="vp-btn"
+                  style={{ fontSize: '0.70rem', padding: '3px 8px' }}
+                  onClick={() => setExitOverrides({})}
+                >
+                  Reset Default
+                </button>
+                <button
+                  type="button"
+                  className="vp-btn"
+                  style={{
+                    fontSize: '0.70rem',
+                    padding: '3px 8px',
+                    background: 'var(--accent-primary)',
+                    color: '#fff',
+                  }}
+                  onClick={() => {
+                    setExitOverrides({
+                      exit_main_west: { z: -2.2 },
+                      exit_emergency_east: { z: 0.8 },
+                      exit_wheelchair_terrace: { x: 0.0 },
+                    });
+                  }}
+                >
+                  ⚡ Auto-Optimize
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

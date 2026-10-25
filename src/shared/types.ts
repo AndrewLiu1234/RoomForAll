@@ -165,6 +165,8 @@ export interface VenueExitPortal {
   label: string;
   /** Floor-plane center [x, z] in metres */
   position: Vec2;
+  /** Platform / floor elevation in metres (e.g. 0.30m for elevated wheelchair terrace) */
+  elevationM?: number;
   /** Clear portal door width in metres */
   widthM: number;
   /** Outward facing yaw in degrees */
@@ -248,7 +250,7 @@ export interface SceneSnapshot {
  * Contract 2: LayoutPatch (PRD §4, §7, §10)
  */
 export interface PatchOperation {
-  targetType: 'object' | 'group';
+  targetType: 'object' | 'group' | 'exit';
   targetId: string;
   /** Translation [dx, dy, dz] in 0.05m steps, |dx| <= 0.60, |dy| <= 0.60, |dz| <= 0.60 */
   deltaPositionM: [number, number, number];
