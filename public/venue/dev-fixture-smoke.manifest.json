@@ -1,0 +1,118 @@
+{
+  "contractVersion": "2.1.0",
+  "captureId": "cap_smoke_dev_fixture_baseline",
+  "runId": "run_smoke_dev_fixture",
+  "phase": "baseline",
+  "sceneHash": "vp_37a1fa125495fb41",
+  "mimeType": "video/webm",
+  "byteLength": 704,
+  "durationSec": 3,
+  "widthPx": 512,
+  "heightPx": 512,
+  "keyframes": [
+    {
+      "viewId": "view_overview_main",
+      "label": "Venue Overview (Rear-West Elevated)",
+      "kind": "overview",
+      "cameraPosition": [
+        -3.12,
+        3.44,
+        5.5200000000000005
+      ],
+      "cameraLookAt": [
+        0,
+        0.95,
+        -2.3200000000000003
+      ],
+      "fovDeg": 52,
+      "aspect": 1,
+      "startSec": 0,
+      "endSec": 0.6
+    },
+    {
+      "viewId": "pov_att_shorter_01",
+      "label": "Sam (Shorter Viewer) (shorter_seated @ place_chair_r2_c1)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_shorter_01",
+      "placeId": "place_chair_r2_c1",
+      "cameraPosition": [
+        0,
+        0.97,
+        0.5
+      ],
+      "cameraLookAt": [
+        0,
+        0.97,
+        -4.5
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 0.6,
+      "endSec": 1.2
+    },
+    {
+      "viewId": "pov_att_extra_legroom_01",
+      "label": "Morgan (Extra-Legroom) (extra_legroom @ place_chair_r1_c2)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_extra_legroom_01",
+      "placeId": "place_chair_r1_c2",
+      "cameraPosition": [
+        1.2,
+        1.2,
+        -0.8
+      ],
+      "cameraLookAt": [
+        1.2,
+        1.2,
+        -5.8
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 1.2,
+      "endSec": 1.8
+    },
+    {
+      "viewId": "pov_att_wheelchair_01",
+      "label": "Jordan (Wheelchair User) (wheelchair_user @ place_bay_wc_01)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_wheelchair_01",
+      "placeId": "place_bay_wc_01",
+      "cameraPosition": [
+        -2,
+        1.18,
+        0.5
+      ],
+      "cameraLookAt": [
+        -2,
+        1.18,
+        -4.5
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 1.8,
+      "endSec": 2.4
+    },
+    {
+      "viewId": "pov_att_adult_01",
+      "label": "Alex (Reference Adult) (reference_adult @ place_chair_r1_c1)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_adult_01",
+      "placeId": "place_chair_r1_c1",
+      "cameraPosition": [
+        -1.2,
+        1.23,
+        -0.8
+      ],
+      "cameraLookAt": [
+        -1.2,
+        1.23,
+        -5.8
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 2.4,
+      "endSec": 3
+    }
+  ],
+  "recordedAtIso": "2026-10-25T18:00:00.000Z"
+}

@@ -1,0 +1,2341 @@
+{
+  "contractVersion": "2.1.0",
+  "sceneId": "prepared_community_hall_24_v1",
+  "source": {
+    "sourceId": "community_hall_24_cc0",
+    "title": "VenuePilot Prepared 24-Place Community Lecture Hall",
+    "license": "CC0-1.0",
+    "sourceUrl": "https://3dassets.dev/packs/village-hall-and-community-events",
+    "assetPath": "/venue/prepared-venue.glb",
+    "assetHash": "vp_ae8e7a3632bb7315",
+    "isFallbackFixture": true,
+    "preparationNotes": "Prepared single-level 24-place community lecture hall (22 chairs + 2 wheelchair bays) with deterministic glTF 2.0 binary asset and collision/occlusion proxy manifest. Village Hall CDN returned HTTP 403 during automated preparation check; generated clean CC0 architectural GLB fixture per PRD §3 fallback protocol."
+  },
+  "roomBounds": {
+    "min": [
+      -6,
+      0,
+      -7.5
+    ],
+    "max": [
+      6,
+      4.2,
+      7
+    ]
+  },
+  "allowedFloorRegions": [
+    {
+      "minX": -5.4,
+      "maxX": 5.4,
+      "minZ": -4.2,
+      "maxZ": 6.6
+    }
+  ],
+  "reservedCirculationRegions": [
+    {
+      "minX": -5.3,
+      "maxX": -4,
+      "minZ": -2.5,
+      "maxZ": 6.5
+    },
+    {
+      "minX": -5.3,
+      "maxX": 4.5,
+      "minZ": 4.65,
+      "maxZ": 6.4
+    }
+  ],
+  "target": {
+    "id": "target_main_screen",
+    "label": "Main Stage Presentation Screen",
+    "center": [
+      0,
+      1.7,
+      -5.5
+    ],
+    "yawDeg": 180,
+    "widthM": 3.6,
+    "heightM": 1.8
+  },
+  "objects": [
+    {
+      "id": "obj_stage_platform",
+      "label": "Main Presentation Stage",
+      "category": "stage",
+      "editable": false,
+      "transform": {
+        "position": [
+          0,
+          0,
+          -5.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          -5.8
+        ],
+        "yawDeg": 0
+      },
+      "proxies": [
+        {
+          "id": "proxy_stage_platform_box",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.25,
+            0
+          ],
+          "localYawDeg": 0,
+          "size": [
+            7.6,
+            0.5,
+            2.2
+          ],
+          "blocksVisibility": false,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_pillar_west",
+      "label": "West Structural Column",
+      "category": "fixed_structure",
+      "editable": false,
+      "transform": {
+        "position": [
+          -3.75,
+          0,
+          -3.5
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -3.75,
+          0,
+          -3.5
+        ],
+        "yawDeg": 0
+      },
+      "proxies": [
+        {
+          "id": "proxy_pillar_west_cyl",
+          "kind": "cylinder",
+          "localPosition": [
+            0,
+            2,
+            0
+          ],
+          "localYawDeg": 0,
+          "radiusM": 0.24,
+          "heightM": 4,
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_pillar_east",
+      "label": "East Structural Column",
+      "category": "fixed_structure",
+      "editable": false,
+      "transform": {
+        "position": [
+          3.75,
+          0,
+          -3.5
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          3.75,
+          0,
+          -3.5
+        ],
+        "yawDeg": 0
+      },
+      "proxies": [
+        {
+          "id": "proxy_pillar_east_cyl",
+          "kind": "cylinder",
+          "localPosition": [
+            0,
+            2,
+            0
+          ],
+          "localYawDeg": 0,
+          "radiusM": 0.24,
+          "heightM": 4,
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_prop_welcome_sign",
+      "label": "Movable Welcome Sign / Sponsor Standee",
+      "category": "movable_prop",
+      "editable": true,
+      "transform": {
+        "position": [
+          0,
+          0,
+          -2.25
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          -2.25
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.5,
+        "maxX": 3.5,
+        "minZ": -3.8,
+        "maxZ": 0.5
+      },
+      "proxies": [
+        {
+          "id": "proxy_prop_welcome_sign_box",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.575,
+            0
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.42,
+            1.15,
+            0.18
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_prop_catering_table",
+      "label": "Movable Stage-Front Literature / Water Table",
+      "category": "movable_prop",
+      "editable": true,
+      "transform": {
+        "position": [
+          1.725,
+          0,
+          -2.35
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.725,
+          0,
+          -2.35
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.5,
+        "maxX": 3.6,
+        "minZ": -3.8,
+        "maxZ": -2
+      },
+      "proxies": [
+        {
+          "id": "proxy_prop_catering_table_box",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.22,
+            0
+          ],
+          "localYawDeg": 0,
+          "size": [
+            2.1,
+            0.44,
+            0.3
+          ],
+          "blocksVisibility": false,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_prop_av_cart",
+      "label": "Movable AV Equipment & Coat Cart",
+      "category": "movable_prop",
+      "editable": true,
+      "transform": {
+        "position": [
+          3.65,
+          0,
+          3.9
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          3.65,
+          0,
+          3.9
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": 2.5,
+        "maxX": 5,
+        "minZ": 2,
+        "maxZ": 4.4
+      },
+      "proxies": [
+        {
+          "id": "proxy_prop_av_cart_box",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.45,
+            0
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.44,
+            0.9,
+            0.44
+          ],
+          "blocksVisibility": false,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r1_c1",
+      "label": "Row 1 Seat 1",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r1_west",
+      "transform": {
+        "position": [
+          -2.3,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -2.3,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r1_c1_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r1_c2",
+      "label": "Row 1 Seat 2",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r1_west",
+      "transform": {
+        "position": [
+          -1.15,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.15,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r1_c2_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r1_c3",
+      "label": "Row 1 Seat 3",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r1_center",
+      "transform": {
+        "position": [
+          0,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r1_c3_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r1_c4",
+      "label": "Row 1 Seat 4",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r1_east",
+      "transform": {
+        "position": [
+          1.15,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.15,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r1_c4_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r1_c5",
+      "label": "Row 1 Seat 5",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r1_east",
+      "transform": {
+        "position": [
+          2.3,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          2.3,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r1_c5_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r2_c1",
+      "label": "Row 2 Seat 1",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r2_west",
+      "transform": {
+        "position": [
+          -2.3,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -2.3,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r2_c1_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r2_c2",
+      "label": "Row 2 Seat 2",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r2_west",
+      "transform": {
+        "position": [
+          -1.15,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.15,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r2_c2_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r2_c3",
+      "label": "Row 2 Seat 3",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r2_west",
+      "transform": {
+        "position": [
+          0,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r2_c3_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r2_c4",
+      "label": "Row 2 Seat 4",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r2_east",
+      "transform": {
+        "position": [
+          1.15,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.15,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r2_c4_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r2_c5",
+      "label": "Row 2 Seat 5",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r2_east",
+      "transform": {
+        "position": [
+          2.3,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          2.3,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r2_c5_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r2_c6",
+      "label": "Row 2 Seat 6",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r2_east",
+      "transform": {
+        "position": [
+          3.25,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          3.25,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r2_c6_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r3_c1",
+      "label": "Row 3 Seat 1",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r3_west",
+      "transform": {
+        "position": [
+          -2.85,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -2.85,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r3_c1_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r3_c2",
+      "label": "Row 3 Seat 2",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r3_west",
+      "transform": {
+        "position": [
+          -1.72,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.72,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r3_c2_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r3_c3",
+      "label": "Row 3 Seat 3",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r3_west",
+      "transform": {
+        "position": [
+          -0.58,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -0.58,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r3_c3_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r3_c4",
+      "label": "Row 3 Seat 4",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r3_east",
+      "transform": {
+        "position": [
+          0.58,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0.58,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r3_c4_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r3_c5",
+      "label": "Row 3 Seat 5",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r3_east",
+      "transform": {
+        "position": [
+          1.72,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.72,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r3_c5_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r3_c6",
+      "label": "Row 3 Seat 6",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r3_east",
+      "transform": {
+        "position": [
+          2.85,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          2.85,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r3_c6_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r4_c1",
+      "label": "Row 4 Seat 1",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r4_center",
+      "transform": {
+        "position": [
+          -1.95,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.95,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r4_c1_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r4_c2",
+      "label": "Row 4 Seat 2",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r4_center",
+      "transform": {
+        "position": [
+          -1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r4_c2_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r4_c3",
+      "label": "Row 4 Seat 3",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r4_center",
+      "transform": {
+        "position": [
+          0,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r4_c3_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r4_c4",
+      "label": "Row 4 Seat 4",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r4_center",
+      "transform": {
+        "position": [
+          1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r4_c4_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_chair_r4_c5",
+      "label": "Row 4 Seat 5",
+      "category": "movable_chair",
+      "editable": true,
+      "groupId": "group_r4_center",
+      "transform": {
+        "position": [
+          1.95,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.95,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      },
+      "proxies": [
+        {
+          "id": "proxy_chair_r4_c5_back",
+          "kind": "box",
+          "localPosition": [
+            0,
+            0.42,
+            0.22
+          ],
+          "localYawDeg": 0,
+          "size": [
+            0.54,
+            0.84,
+            0.08
+          ],
+          "blocksVisibility": true,
+          "blocksMovement": true
+        }
+      ]
+    },
+    {
+      "id": "obj_bay_wc_01",
+      "label": "West Accessible Wheelchair Bay W1",
+      "category": "wheelchair_bay_frame",
+      "editable": false,
+      "transform": {
+        "position": [
+          -3.1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -3.1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "proxies": []
+    },
+    {
+      "id": "obj_bay_wc_02",
+      "label": "East Accessible Wheelchair Bay W2",
+      "category": "wheelchair_bay_frame",
+      "editable": false,
+      "transform": {
+        "position": [
+          3.1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          3.1,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "proxies": []
+    }
+  ],
+  "chairGroups": [
+    {
+      "id": "group_r1_west",
+      "label": "Row 1 West Pair",
+      "memberObjectIds": [
+        "obj_chair_r1_c1",
+        "obj_chair_r1_c2"
+      ],
+      "transform": {
+        "position": [
+          -1.725,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.725,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r1_center",
+      "label": "Row 1 Center Seat",
+      "memberObjectIds": [
+        "obj_chair_r1_c3"
+      ],
+      "transform": {
+        "position": [
+          0,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r1_east",
+      "label": "Row 1 East Extra-Legroom Pair",
+      "memberObjectIds": [
+        "obj_chair_r1_c4",
+        "obj_chair_r1_c5"
+      ],
+      "transform": {
+        "position": [
+          1.725,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.725,
+          0,
+          -1.8
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r2_west",
+      "label": "Row 2 West Block",
+      "memberObjectIds": [
+        "obj_chair_r2_c1",
+        "obj_chair_r2_c2",
+        "obj_chair_r2_c3"
+      ],
+      "transform": {
+        "position": [
+          -1.15,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.15,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r2_east",
+      "label": "Row 2 East Block",
+      "memberObjectIds": [
+        "obj_chair_r2_c4",
+        "obj_chair_r2_c5",
+        "obj_chair_r2_c6"
+      ],
+      "transform": {
+        "position": [
+          2.233,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          2.233,
+          0,
+          -0.3
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r3_west",
+      "label": "Row 3 West Staggered Block",
+      "memberObjectIds": [
+        "obj_chair_r3_c1",
+        "obj_chair_r3_c2",
+        "obj_chair_r3_c3"
+      ],
+      "transform": {
+        "position": [
+          -1.717,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          -1.717,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r3_east",
+      "label": "Row 3 East Staggered Block",
+      "memberObjectIds": [
+        "obj_chair_r3_c4",
+        "obj_chair_r3_c5",
+        "obj_chair_r3_c6"
+      ],
+      "transform": {
+        "position": [
+          1.717,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          1.717,
+          0,
+          1.2
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    },
+    {
+      "id": "group_r4_center",
+      "label": "Row 4 Center Block",
+      "memberObjectIds": [
+        "obj_chair_r4_c1",
+        "obj_chair_r4_c2",
+        "obj_chair_r4_c3",
+        "obj_chair_r4_c4",
+        "obj_chair_r4_c5"
+      ],
+      "transform": {
+        "position": [
+          0,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "baselineTransform": {
+        "position": [
+          0,
+          0,
+          2.7
+        ],
+        "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.4,
+        "maxZ": 4.2
+      }
+    }
+  ],
+  "places": [
+    {
+      "id": "place_chair_r1_c1",
+      "label": "Seat R1-1",
+      "kind": "chair",
+      "objectId": "obj_chair_r1_c1",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row1_aisle",
+      "routeAnchorPoint": [
+        -2.3,
+        -1.05
+      ]
+    },
+    {
+      "id": "place_chair_r1_c2",
+      "label": "Seat R1-2",
+      "kind": "chair",
+      "objectId": "obj_chair_r1_c2",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row1_aisle",
+      "routeAnchorPoint": [
+        -1.15,
+        -1.05
+      ]
+    },
+    {
+      "id": "place_chair_r1_c3",
+      "label": "Seat R1-3",
+      "kind": "chair",
+      "objectId": "obj_chair_r1_c3",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row1_aisle",
+      "routeAnchorPoint": [
+        0,
+        -1.05
+      ]
+    },
+    {
+      "id": "place_chair_r1_c4",
+      "label": "Seat R1-4",
+      "kind": "chair",
+      "objectId": "obj_chair_r1_c4",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row1_aisle",
+      "routeAnchorPoint": [
+        1.15,
+        -1.05
+      ]
+    },
+    {
+      "id": "place_chair_r1_c5",
+      "label": "Seat R1-5",
+      "kind": "chair",
+      "objectId": "obj_chair_r1_c5",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row1_aisle",
+      "routeAnchorPoint": [
+        2.3,
+        -1.05
+      ]
+    },
+    {
+      "id": "place_chair_r2_c1",
+      "label": "Seat R2-1",
+      "kind": "chair",
+      "objectId": "obj_chair_r2_c1",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row2_aisle",
+      "routeAnchorPoint": [
+        -2.3,
+        0.45
+      ]
+    },
+    {
+      "id": "place_chair_r2_c2",
+      "label": "Seat R2-2",
+      "kind": "chair",
+      "objectId": "obj_chair_r2_c2",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row2_aisle",
+      "routeAnchorPoint": [
+        -1.15,
+        0.45
+      ]
+    },
+    {
+      "id": "place_chair_r2_c3",
+      "label": "Seat R2-3",
+      "kind": "chair",
+      "objectId": "obj_chair_r2_c3",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row2_aisle",
+      "routeAnchorPoint": [
+        0,
+        0.45
+      ]
+    },
+    {
+      "id": "place_chair_r2_c4",
+      "label": "Seat R2-4",
+      "kind": "chair",
+      "objectId": "obj_chair_r2_c4",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row2_aisle",
+      "routeAnchorPoint": [
+        1.15,
+        0.45
+      ]
+    },
+    {
+      "id": "place_chair_r2_c5",
+      "label": "Seat R2-5",
+      "kind": "chair",
+      "objectId": "obj_chair_r2_c5",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row2_aisle",
+      "routeAnchorPoint": [
+        2.3,
+        0.45
+      ]
+    },
+    {
+      "id": "place_chair_r2_c6",
+      "label": "Seat R2-6",
+      "kind": "chair",
+      "objectId": "obj_chair_r2_c6",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row2_aisle",
+      "routeAnchorPoint": [
+        3.25,
+        0.45
+      ]
+    },
+    {
+      "id": "place_chair_r3_c1",
+      "label": "Seat R3-1",
+      "kind": "chair",
+      "objectId": "obj_chair_r3_c1",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row3_aisle",
+      "routeAnchorPoint": [
+        -2.85,
+        1.95
+      ]
+    },
+    {
+      "id": "place_chair_r3_c2",
+      "label": "Seat R3-2",
+      "kind": "chair",
+      "objectId": "obj_chair_r3_c2",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row3_aisle",
+      "routeAnchorPoint": [
+        -1.72,
+        1.95
+      ]
+    },
+    {
+      "id": "place_chair_r3_c3",
+      "label": "Seat R3-3",
+      "kind": "chair",
+      "objectId": "obj_chair_r3_c3",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row3_aisle",
+      "routeAnchorPoint": [
+        -0.58,
+        1.95
+      ]
+    },
+    {
+      "id": "place_chair_r3_c4",
+      "label": "Seat R3-4",
+      "kind": "chair",
+      "objectId": "obj_chair_r3_c4",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row3_aisle",
+      "routeAnchorPoint": [
+        0.58,
+        1.95
+      ]
+    },
+    {
+      "id": "place_chair_r3_c5",
+      "label": "Seat R3-5",
+      "kind": "chair",
+      "objectId": "obj_chair_r3_c5",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_row3_aisle",
+      "routeAnchorPoint": [
+        1.72,
+        1.95
+      ]
+    },
+    {
+      "id": "place_chair_r3_c6",
+      "label": "Seat R3-6",
+      "kind": "chair",
+      "objectId": "obj_chair_r3_c6",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_row3_aisle",
+      "routeAnchorPoint": [
+        2.85,
+        1.95
+      ]
+    },
+    {
+      "id": "place_chair_r4_c1",
+      "label": "Seat R4-1",
+      "kind": "chair",
+      "objectId": "obj_chair_r4_c1",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        -1.95,
+        4.9
+      ]
+    },
+    {
+      "id": "place_chair_r4_c2",
+      "label": "Seat R4-2",
+      "kind": "chair",
+      "objectId": "obj_chair_r4_c2",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        -1,
+        4.9
+      ]
+    },
+    {
+      "id": "place_chair_r4_c3",
+      "label": "Seat R4-3",
+      "kind": "chair",
+      "objectId": "obj_chair_r4_c3",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        0,
+        4.9
+      ]
+    },
+    {
+      "id": "place_chair_r4_c4",
+      "label": "Seat R4-4",
+      "kind": "chair",
+      "objectId": "obj_chair_r4_c4",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": false,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        1,
+        4.9
+      ]
+    },
+    {
+      "id": "place_chair_r4_c5",
+      "label": "Seat R4-5",
+      "kind": "chair",
+      "objectId": "obj_chair_r4_c5",
+      "seatHeightM": 0.45,
+      "widthM": 0.62,
+      "depthM": 0.68,
+      "isAisle": true,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        1.95,
+        4.9
+      ]
+    },
+    {
+      "id": "place_bay_wc_01",
+      "label": "Wheelchair Bay W1 (West)",
+      "kind": "wheelchair_bay",
+      "objectId": "obj_bay_wc_01",
+      "seatHeightM": 0,
+      "widthM": 0.96,
+      "depthM": 1.35,
+      "isAisle": true,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        -3.1,
+        4.9
+      ],
+      "turningPadCenter": [
+        -3.1,
+        3.9
+      ],
+      "turningPadDiameterM": 1.55
+    },
+    {
+      "id": "place_bay_wc_02",
+      "label": "Wheelchair Bay W2 (East)",
+      "kind": "wheelchair_bay",
+      "objectId": "obj_bay_wc_02",
+      "seatHeightM": 0,
+      "widthM": 0.96,
+      "depthM": 1.35,
+      "isAisle": true,
+      "routeId": "route_rear_main",
+      "routeAnchorPoint": [
+        3.1,
+        4.9
+      ],
+      "turningPadCenter": [
+        3.1,
+        3.9
+      ],
+      "turningPadDiameterM": 1.55
+    }
+  ],
+  "routes": [
+    {
+      "id": "route_rear_main",
+      "label": "West Entrance & Rear Main Cross-Aisle Corridor",
+      "waypoints": [
+        [
+          -4.65,
+          6.2
+        ],
+        [
+          -4.65,
+          4.9
+        ],
+        [
+          3.5,
+          4.9
+        ]
+      ],
+      "widthM": 1.25
+    },
+    {
+      "id": "route_row3_aisle",
+      "label": "Row 3 Cross-Aisle Access Corridor",
+      "waypoints": [
+        [
+          -4.65,
+          6.2
+        ],
+        [
+          -4.65,
+          1.95
+        ],
+        [
+          3.4,
+          1.95
+        ]
+      ],
+      "widthM": 0.95
+    },
+    {
+      "id": "route_row2_aisle",
+      "label": "Row 2 Cross-Aisle Access Corridor",
+      "waypoints": [
+        [
+          -4.65,
+          6.2
+        ],
+        [
+          -4.65,
+          0.45
+        ],
+        [
+          3.4,
+          0.45
+        ]
+      ],
+      "widthM": 0.95
+    },
+    {
+      "id": "route_row1_aisle",
+      "label": "Row 1 Cross-Aisle Access Corridor",
+      "waypoints": [
+        [
+          -4.65,
+          6.2
+        ],
+        [
+          -4.65,
+          -1.05
+        ],
+        [
+          2.6,
+          -1.05
+        ]
+      ],
+      "widthM": 0.95
+    }
+  ],
+  "profiles": {
+    "reference_adult": {
+      "id": "reference_adult",
+      "label": "Reference seated adult",
+      "compatiblePlaceKinds": [
+        "chair"
+      ],
+      "eyeHeightMode": "seat_offset",
+      "eyeOffsetAboveSeatM": 0.78,
+      "requiredFootprintWidthM": 0.55,
+      "requiredFootprintDepthM": 0.6,
+      "requiredFrontLegroomM": 0.35,
+      "requiredRouteWidthM": 0.65,
+      "requiredTurningCircleDiameterM": 0,
+      "prefersAisle": false,
+      "torsoProxyHeightM": 0.85,
+      "torsoProxyWidthM": 0.46,
+      "torsoProxyDepthM": 0.3
+    },
+    "shorter_seated": {
+      "id": "shorter_seated",
+      "label": "Child / shorter seated viewer",
+      "compatiblePlaceKinds": [
+        "chair"
+      ],
+      "eyeHeightMode": "seat_offset",
+      "eyeOffsetAboveSeatM": 0.52,
+      "requiredFootprintWidthM": 0.5,
+      "requiredFootprintDepthM": 0.55,
+      "requiredFrontLegroomM": 0.3,
+      "requiredRouteWidthM": 0.65,
+      "requiredTurningCircleDiameterM": 0,
+      "prefersAisle": false,
+      "torsoProxyHeightM": 0.6,
+      "torsoProxyWidthM": 0.38,
+      "torsoProxyDepthM": 0.26
+    },
+    "wheelchair_user": {
+      "id": "wheelchair_user",
+      "label": "Wheelchair user",
+      "compatiblePlaceKinds": [
+        "wheelchair_bay"
+      ],
+      "eyeHeightMode": "independent",
+      "independentEyeHeightM": 1.18,
+      "requiredFootprintWidthM": 0.85,
+      "requiredFootprintDepthM": 1.25,
+      "requiredFrontLegroomM": 0.2,
+      "requiredRouteWidthM": 0.92,
+      "requiredTurningCircleDiameterM": 1.5,
+      "prefersAisle": true,
+      "torsoProxyHeightM": 1.25,
+      "torsoProxyWidthM": 0.65,
+      "torsoProxyDepthM": 0.6
+    },
+    "extra_legroom": {
+      "id": "extra_legroom",
+      "label": "Extra-legroom attendee (optionally labeled pregnant)",
+      "compatiblePlaceKinds": [
+        "chair"
+      ],
+      "eyeHeightMode": "seat_offset",
+      "eyeOffsetAboveSeatM": 0.75,
+      "requiredFootprintWidthM": 0.58,
+      "requiredFootprintDepthM": 0.65,
+      "requiredFrontLegroomM": 0.55,
+      "requiredRouteWidthM": 0.75,
+      "requiredTurningCircleDiameterM": 0,
+      "prefersAisle": true,
+      "torsoProxyHeightM": 0.83,
+      "torsoProxyWidthM": 0.48,
+      "torsoProxyDepthM": 0.34
+    }
+  },
+  "roster": [
+    {
+      "attendeeId": "att_adult_01",
+      "label": "Alex Rivera (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r1_c1"
+    },
+    {
+      "attendeeId": "att_adult_02",
+      "label": "Blair Chen (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r1_c2"
+    },
+    {
+      "attendeeId": "att_shorter_01",
+      "label": "Sam Patel (Shorter Viewer)",
+      "profileId": "shorter_seated",
+      "assignedPlaceId": "place_chair_r1_c3"
+    },
+    {
+      "attendeeId": "att_extra_legroom_01",
+      "label": "Morgan Lee (Extra-Legroom)",
+      "profileId": "extra_legroom",
+      "assignedPlaceId": "place_chair_r1_c4"
+    },
+    {
+      "attendeeId": "att_extra_legroom_02",
+      "label": "Taylor Kim (Extra-Legroom)",
+      "profileId": "extra_legroom",
+      "assignedPlaceId": "place_chair_r1_c5"
+    },
+    {
+      "attendeeId": "att_extra_legroom_03",
+      "label": "Casey Brooks (Extra-Legroom)",
+      "profileId": "extra_legroom",
+      "assignedPlaceId": "place_chair_r2_c1"
+    },
+    {
+      "attendeeId": "att_shorter_02",
+      "label": "Riley Gomez (Shorter Viewer)",
+      "profileId": "shorter_seated",
+      "assignedPlaceId": "place_chair_r2_c2"
+    },
+    {
+      "attendeeId": "att_adult_03",
+      "label": "Devon Okafor (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r2_c3"
+    },
+    {
+      "attendeeId": "att_adult_04",
+      "label": "Jamie Vance (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r2_c4"
+    },
+    {
+      "attendeeId": "att_adult_05",
+      "label": "Quinn Shah (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r2_c5"
+    },
+    {
+      "attendeeId": "att_shorter_03",
+      "label": "Avery Lin (Shorter Viewer)",
+      "profileId": "shorter_seated",
+      "assignedPlaceId": "place_chair_r2_c6"
+    },
+    {
+      "attendeeId": "att_extra_legroom_04",
+      "label": "Drew Morales (Extra-Legroom)",
+      "profileId": "extra_legroom",
+      "assignedPlaceId": "place_chair_r3_c1"
+    },
+    {
+      "attendeeId": "att_shorter_04",
+      "label": "charlie Wu (Shorter Viewer)",
+      "profileId": "shorter_seated",
+      "assignedPlaceId": "place_chair_r3_c2"
+    },
+    {
+      "attendeeId": "att_adult_06",
+      "label": "Hayden Novak (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r3_c3"
+    },
+    {
+      "attendeeId": "att_adult_07",
+      "label": "Parker Silva (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r3_c4"
+    },
+    {
+      "attendeeId": "att_adult_08",
+      "label": "Reese Kaur (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r3_c5"
+    },
+    {
+      "attendeeId": "att_adult_09",
+      "label": "Skyler Cho (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r3_c6"
+    },
+    {
+      "attendeeId": "att_adult_10",
+      "label": "Emerson Bell (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r4_c1"
+    },
+    {
+      "attendeeId": "att_adult_11",
+      "label": "Finley Diaz (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r4_c2"
+    },
+    {
+      "attendeeId": "att_adult_12",
+      "label": "Rowan Park (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r4_c3"
+    },
+    {
+      "attendeeId": "att_adult_13",
+      "label": "Sage Ortiz (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r4_c4"
+    },
+    {
+      "attendeeId": "att_adult_14",
+      "label": "Kendall Hassan (Reference Adult)",
+      "profileId": "reference_adult",
+      "assignedPlaceId": "place_chair_r4_c5"
+    },
+    {
+      "attendeeId": "att_wheelchair_01",
+      "label": "Jordan Taylor (Wheelchair User)",
+      "profileId": "wheelchair_user",
+      "assignedPlaceId": "place_bay_wc_02"
+    },
+    {
+      "attendeeId": "att_wheelchair_02",
+      "label": "Noel Baptiste (Wheelchair User)",
+      "profileId": "wheelchair_user",
+      "assignedPlaceId": "place_bay_wc_01"
+    }
+  ],
+  "sceneHash": "vp_c59d3dc3f0ab24d3"
+}

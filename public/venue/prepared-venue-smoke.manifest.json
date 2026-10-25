@@ -1,0 +1,118 @@
+{
+  "contractVersion": "2.1.0",
+  "captureId": "cap_smoke_prepared_venue_baseline",
+  "runId": "run_smoke_prepared_venue",
+  "phase": "baseline",
+  "sceneHash": "vp_c59d3dc3f0ab24d3",
+  "mimeType": "video/webm",
+  "byteLength": 1428,
+  "durationSec": 10,
+  "widthPx": 512,
+  "heightPx": 512,
+  "keyframes": [
+    {
+      "viewId": "view_overview_main",
+      "label": "Venue Overview (Rear-West Elevated)",
+      "kind": "overview",
+      "cameraPosition": [
+        -3.48,
+        3.612,
+        6.44
+      ],
+      "cameraLookAt": [
+        0,
+        0.95,
+        -2.2800000000000002
+      ],
+      "fovDeg": 52,
+      "aspect": 1,
+      "startSec": 0,
+      "endSec": 2
+    },
+    {
+      "viewId": "pov_att_shorter_01",
+      "label": "Sam Patel (Shorter Viewer) (shorter_seated @ place_chair_r1_c3)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_shorter_01",
+      "placeId": "place_chair_r1_c3",
+      "cameraPosition": [
+        0,
+        0.97,
+        -1.8
+      ],
+      "cameraLookAt": [
+        0,
+        0.97,
+        -6.8
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 2,
+      "endSec": 4
+    },
+    {
+      "viewId": "pov_att_extra_legroom_01",
+      "label": "Morgan Lee (Extra-Legroom) (extra_legroom @ place_chair_r1_c4)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_extra_legroom_01",
+      "placeId": "place_chair_r1_c4",
+      "cameraPosition": [
+        1.15,
+        1.2,
+        -1.8
+      ],
+      "cameraLookAt": [
+        1.15,
+        1.2,
+        -6.8
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 4,
+      "endSec": 6
+    },
+    {
+      "viewId": "pov_att_wheelchair_01",
+      "label": "Jordan Taylor (Wheelchair User) (wheelchair_user @ place_bay_wc_02)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_wheelchair_01",
+      "placeId": "place_bay_wc_02",
+      "cameraPosition": [
+        3.1,
+        1.18,
+        2.7
+      ],
+      "cameraLookAt": [
+        3.1,
+        1.18,
+        -2.3
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 6,
+      "endSec": 8
+    },
+    {
+      "viewId": "pov_att_adult_01",
+      "label": "Alex Rivera (Reference Adult) (reference_adult @ place_chair_r1_c1)",
+      "kind": "attendee_pov",
+      "attendeeId": "att_adult_01",
+      "placeId": "place_chair_r1_c1",
+      "cameraPosition": [
+        -2.3,
+        1.23,
+        -1.8
+      ],
+      "cameraLookAt": [
+        -2.3,
+        1.23,
+        -6.8
+      ],
+      "fovDeg": 90,
+      "aspect": 1,
+      "startSec": 8,
+      "endSec": 10
+    }
+  ],
+  "recordedAtIso": "2026-10-25T18:00:00.000Z"
+}

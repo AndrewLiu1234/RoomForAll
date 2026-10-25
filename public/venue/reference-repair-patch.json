@@ -1,0 +1,61 @@
+{
+  "contractVersion": "2.1.0",
+  "runId": "run_reference_check",
+  "parentSceneHash": "vp_c59d3dc3f0ab24d3",
+  "diagnosis": [
+    {
+      "attendeeId": "att_shorter_01",
+      "viewId": "pov_att_shorter_01",
+      "timestampSec": 3.5,
+      "observation": "Movable welcome sign at [0.0, 0.0, -2.55] blocks the lower and central portions of the presentation screen for the shorter seated viewer in Row 1 Center."
+    },
+    {
+      "attendeeId": "att_extra_legroom_01",
+      "viewId": "pov_att_extra_legroom_01",
+      "timestampSec": 6,
+      "observation": "Stage-front literature table at Z = -2.35m leaves only 0.40m of front clearance for Row 1 East extra-legroom seats (0.55m required)."
+    },
+    {
+      "attendeeId": "att_wheelchair_01",
+      "viewId": "pov_att_wheelchair_01",
+      "timestampSec": 8.5,
+      "observation": "Movable AV equipment cart at [3.65, 0.0, 3.90] intrudes into East Wheelchair Bay W2 turning pad ([3.10, 3.90], diameter 1.55m)."
+    }
+  ],
+  "operations": [
+    {
+      "targetType": "object",
+      "targetId": "obj_prop_welcome_sign",
+      "deltaPositionM": [
+        -0.55,
+        0,
+        0
+      ],
+      "deltaYawDeg": 0,
+      "reason": "Shift movable welcome sign 0.55m west into the inter-column gap so shorter seated viewer sightlines to the main screen are unobstructed."
+    },
+    {
+      "targetType": "object",
+      "targetId": "obj_prop_catering_table",
+      "deltaPositionM": [
+        0,
+        0,
+        -0.35
+      ],
+      "deltaYawDeg": 0,
+      "reason": "Move stage-front literature table 0.35m toward the stage to provide 0.75m front legroom (>= 0.55m required) for Row 1 East extra-legroom attendees."
+    },
+    {
+      "targetType": "object",
+      "targetId": "obj_prop_av_cart",
+      "deltaPositionM": [
+        0.6,
+        0,
+        0
+      ],
+      "deltaYawDeg": 0,
+      "reason": "Relocate movable AV cart 0.60m east into the open side alcove outside East Wheelchair Bay W2 turning circle."
+    }
+  ],
+  "summary": "Relocated three movable venue props within bounded 0.05m increments to clear shorter-viewer sightlines, expand Row 1 East extra legroom, and unobstructed Wheelchair Bay W1 turning space."
+}
