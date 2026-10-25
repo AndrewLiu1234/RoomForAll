@@ -9,7 +9,12 @@ import {
   type RunRecord,
   type SceneSnapshot,
 } from './shared/index.js';
-import { createPreparedVenueSnapshot } from './scene/index.js';
+import {
+  createPreparedVenueSnapshot,
+  generateSampleCustomAuditoriumGlb,
+  parseAndLabelGlbVenue,
+  type GlbVenueParseReport,
+} from './scene/index.js';
 import {
   ComparisonPanel,
   ProfileEditorModal,
@@ -23,12 +28,14 @@ import {
   postCreateRun,
   postPreview,
   uploadRunEvidence,
+  type VenuePresetMode,
 } from './ui/index.js';
 
 export function App(): React.ReactElement {
-  const [venuePreset, setVenuePreset] = useState<'prepared_24' | 'dev_4'>(
-    'prepared_24',
-  );
+  const [venuePreset, setVenuePreset] =
+    useState<VenuePresetMode>('prepared_24');
+  const [glbParseReport, setGlbParseReport] =
+    useState<GlbVenueParseReport | null>(null);
   const initialSnapshot = useMemo(() => createPreparedVenueSnapshot(), []);
   const [baselineSnapshot, setBaselineSnapshot] =
     useState<SceneSnapshot>(initialSnapshot);
@@ -282,18 +289,31 @@ export function App(): React.ReactElement {
     }
   };
 
-  const handleSelectVenuePreset = (preset: 'prepared_24' | 'dev_4'): void => {
+  const handleSelectVenuePreset = (preset: VenuePresetMode): void => {
     if (activeRun && activeRun.state !== 'finished') return;
-    const nextSnap =
-      preset === 'prepared_24'
-        ? createPreparedVenueSnapshot()
-        : createDevFixtureSnapshot();
+    let nextSnap: SceneSnapshot;
+    if (preset === 'prepared_24') {
+      nextSnap = createPreparedVenueSnapshot();
+    } else if (preset === 'dev_4') {
+      nextSnap = createDevFixtureSnapshot();
+    } else {
+      const sampleGlb = generateSampleCustomAuditoriumGlb();
+      const report = parseAndLabelGlbVenue(sampleGlb.glbBytes, {
+        fileName: sampleGlb.fileName,
+      });
+      setGlbParseReport(report);
+      nextSnap = report.snapshot;
+    }
     setVenuePreset(preset);
     setBaselineSnapshot(nextSnap);
     setBaselineEvaluation(evaluateSceneWithFallback(nextSnap));
     setActiveRun(null);
     setViewingStage('baseline');
-    setCaptureStatusText(null);
+    setCaptureStatusText(
+      preset === 'custom_glb'
+        ? 'Parsed 16-Place Civic Auditorium (.glb): auto-labeled 14 seats, 2 wheelchair bays, stage, screen, routes, and 3 movable props.'
+        : null,
+    );
     setErrorText(null);
     setSelectedAttendeeId(
       nextSnap.roster.find((a) => a.attendeeId === 'att_shorter_01')
@@ -303,15 +323,43 @@ export function App(): React.ReactElement {
     );
   };
 
+  const handleUploadGlbFile = async (file: File): Promise<void> => {
+    if (activeRun && activeRun.state !== 'finished') return;
+    setErrorText(null);
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const report = parseAndLabelGlbVenue(buf, { fileName: file.name });
+      setGlbParseReport(report);
+      setVenuePreset('custom_glb');
+      setBaselineSnapshot(report.snapshot);
+      setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+      setActiveRun(null);
+      setViewingStage('baseline');
+      setCaptureStatusText(
+        `Parsed uploaded 3D building "${file.name}": labeled ${report.counts.seats} seats, ${report.counts.wheelchairBays} wheelchair bays, and ${report.snapshot.routes.length} access routes.`,
+      );
+      setSelectedAttendeeId(
+        report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+          ?.attendeeId ??
+          report.snapshot.roster[0]?.attendeeId ??
+          '',
+      );
+    } catch (err) {
+      setErrorText(
+        err instanceof Error ? err.message : 'Failed to parse uploaded .glb file.',
+      );
+    }
+  };
+
   const handlePreviewLocalRepair = (): void => {
     setErrorText(null);
     const previewRun = createLocalFixtureRepairPreviewRun(baselineSnapshot);
     setActiveRun(previewRun);
     setViewingStage('best');
     setCaptureStatusText(
-      venuePreset === 'prepared_24'
-        ? 'Showing 24-Place Reference Repair Preview (welcome sign, literature table, and AV cart relocated; all 24 places pass).'
-        : 'Showing 4-Place Compact Hall Repair Preview (obj_prop_sign_01 shifted; Sam R2-1 visibility 54/135 → 135/135).',
+      venuePreset === 'dev_4'
+        ? 'Showing 4-Place Compact Hall Repair Preview (obj_prop_sign_01 shifted; Sam R2-1 visibility 54/135 → 135/135).'
+        : `Showing ${baselineSnapshot.places.length}-Place Reference Repair Preview (welcome sign, literature table, and AV cart relocated; all ${baselineSnapshot.places.length} places pass).`,
     );
   };
 
@@ -339,7 +387,9 @@ export function App(): React.ReactElement {
         captureStatusText={captureStatusText}
         errorText={errorText}
         venuePreset={venuePreset}
+        glbParseReport={glbParseReport}
         onSelectVenuePreset={handleSelectVenuePreset}
+        onUploadGlbFile={(file) => void handleUploadGlbFile(file)}
         onStartLiveRun={() => void handleStartLiveRun()}
         onPreviewLocalRepair={handlePreviewLocalRepair}
         onResetToBaseline={handleResetToBaseline}

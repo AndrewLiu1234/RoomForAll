@@ -125,7 +125,14 @@ export function createLocalFixtureRepairPreviewRun(
   const baselineEvaluation = evaluateSceneWithFallback(baselineSnapshot);
   const nowIso = new Date().toISOString();
 
-  if (baselineSnapshot.sceneId === PREPARED_VENUE_SCENE_ID) {
+  const hasPreparedProps = baselineSnapshot.objects.some(
+    (o) => o.id === 'obj_prop_welcome_sign',
+  );
+
+  if (
+    baselineSnapshot.sceneId === PREPARED_VENUE_SCENE_ID ||
+    hasPreparedProps
+  ) {
     const patch = createPreparedVenueReferencePatch(
       'preview_dev_fixture',
       baselineSnapshot.sceneHash,
@@ -139,14 +146,14 @@ export function createLocalFixtureRepairPreviewRun(
       ? withUpdatedSceneHash(validated.snapshot)
       : baselineSnapshot;
     const bestEvaluation = evaluateSceneWithFallback(bestSnapshot);
+    const placeCount = bestSnapshot.places.length;
 
     return {
       contractVersion: CONTRACT_VERSION,
       runId: 'preview_dev_fixture',
       state: 'finished',
       outcome: 'improved',
-      terminalReason:
-        'Local 24-Place Reference Repair Preview (use "Review and Improve" for live Gemini 4 Argon run).',
+      terminalReason: `Local ${placeCount}-Place Reference Repair Preview (use "Review and Improve" for live Gemini 4 Argon run).`,
       createdAtIso: nowIso,
       updatedAtIso: nowIso,
       deadlineIso: nowIso,
@@ -167,7 +174,7 @@ export function createLocalFixtureRepairPreviewRun(
         },
       ],
       finalInspection: {
-        captureId: 'cap_preview_revision_24',
+        captureId: `cap_preview_revision_${placeCount}`,
         sceneHash: bestSnapshot.sceneHash,
         findings: [
           {
@@ -192,8 +199,7 @@ export function createLocalFixtureRepairPreviewRun(
               'Shifting obj_prop_av_cart 0.60m east cleared Wheelchair Bay W2 turning circle (1.55m diameter unobstructed).',
           },
         ],
-        remainingIssuesSummary:
-          'All 24 audience places now satisfy sightline, route, footprint, front-legroom, and wheelchair turning-space requirements (0 failed checks).',
+        remainingIssuesSummary: `All ${placeCount} audience places now satisfy sightline, route, footprint, front-legroom, and wheelchair turning-space requirements (0 failed checks).`,
       },
       providerModel: 'local-reference-preview (no paid model call)',
       providerRequestIds: [],

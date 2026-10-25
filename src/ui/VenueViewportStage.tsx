@@ -6,7 +6,7 @@ import {
   type Evaluation,
   type SceneSnapshot,
 } from '../shared/index.js';
-import type { VenueViewportProps } from '../scene/index.js';
+import { disposeVenueScene, type VenueViewportProps } from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
 import { computeAttendeeSampleVisibilityMask } from './localEvaluatorFallback.js';
 
@@ -28,6 +28,11 @@ export function VenueViewportStage({
   onToggleSightlineOverlays,
 }: InteractiveViewportStageProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const renderFrameRef = useRef<(() => void) | null>(null);
+
   const [orbitAngles, setOrbitAngles] = useState<{
     azimuthRad: number;
     polarRad: number;
@@ -35,16 +40,23 @@ export function VenueViewportStage({
   }>(() => ({
     azimuthRad: 0.38,
     polarRad: 0.92,
-    distanceM: snapshot.places.length > 8 ? 10.8 : 7.4,
+    distanceM: snapshot.places.length > 8 ? 11.5 : 7.4,
   }));
+
+  const orbitAnglesRef = useRef(orbitAngles);
+  orbitAnglesRef.current = orbitAngles;
+
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
 
   useEffect(() => {
     setOrbitAngles({
       azimuthRad: 0.38,
       polarRad: 0.92,
-      distanceM: snapshot.places.length > 8 ? 10.8 : 7.4,
+      distanceM: snapshot.places.length > 8 ? 11.5 : 7.4,
     });
   }, [snapshot.sceneId]);
+
   const dragStateRef = useRef<{
     dragging: boolean;
     lastX: number;
@@ -62,33 +74,75 @@ export function VenueViewportStage({
     ? evaluation.attendees[selectedAttendeeId]
     : undefined;
 
+  // 1. Mount / Unmount Effect: Create a single persistent WebGLRenderer (prevents WebGL context exhaustion on drag!)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
-
-    const width = Math.max(320, container.clientWidth);
-    const height = Math.max(320, container.clientHeight);
+    if (!container || typeof document === 'undefined') return;
 
     let renderer: THREE.WebGLRenderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: 'high-performance',
+      });
     } catch {
       return;
     }
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const width = Math.max(320, container.clientWidth);
+    const height = Math.max(320, container.clientHeight);
     renderer.setSize(width, height);
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    const scene = new THREE.Scene();
+    rendererRef.current = renderer;
+    sceneRef.current = new THREE.Scene();
+    cameraRef.current = new THREE.PerspectiveCamera(
+      52,
+      width / height,
+      INSPECTION_CAMERA.nearM,
+      INSPECTION_CAMERA.farM,
+    );
+
+    const handleResize = (): void => {
+      renderFrameRef.current?.();
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (sceneRef.current) {
+        disposeVenueScene(sceneRef.current);
+        sceneRef.current = null;
+      }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        try {
+          rendererRef.current.forceContextLoss();
+        } catch {
+          // Ignore if extension unavailable
+        }
+        rendererRef.current = null;
+      }
+      cameraRef.current = null;
+      container.innerHTML = '';
+    };
+  }, []);
+
+  // 2. Scene Rebuild Effect: Only rebuilds scene geometry when snapshot, selection, viewMode, or overlays change
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    disposeVenueScene(scene);
+
     populateThreeSceneFromSnapshot(scene, snapshot, {
       hideAttendeeId:
         viewMode === 'attendee_pov' ? selectedAttendeeId : undefined,
       forBlindEvidenceCapture: false,
     });
 
-    // Add route polylines and dynamic final-approach segments in overview mode
     if (viewMode === 'overview') {
       for (const route of snapshot.routes) {
         if (route.waypoints.length >= 2) {
@@ -116,7 +170,6 @@ export function VenueViewportStage({
             ? 0x10b981
             : 0xef4444;
 
-        // Selection / status ring on floor under seat/bay
         const ringGeo = new THREE.RingGeometry(
           isSelected ? 0.42 : 0.36,
           isSelected ? 0.52 : 0.43,
@@ -135,7 +188,25 @@ export function VenueViewportStage({
         );
         scene.add(ringMesh);
 
-        // Final approach segment from routeAnchorPoint to seat
+        if (place.turningPadCenter && place.turningPadDiameterM) {
+          const padR = place.turningPadDiameterM * 0.5;
+          const padGeo = new THREE.RingGeometry(padR - 0.035, padR, 36);
+          const padMat = new THREE.MeshBasicMaterial({
+            color: attEval?.turningSpacePass === false ? 0xef4444 : 0xa78bfa,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.65,
+          });
+          const padMesh = new THREE.Mesh(padGeo, padMat);
+          padMesh.rotation.x = -Math.PI / 2;
+          padMesh.position.set(
+            place.turningPadCenter[0],
+            0.018,
+            place.turningPadCenter[1],
+          );
+          scene.add(padMesh);
+        }
+
         const approachPts = [
           new THREE.Vector3(
             place.routeAnchorPoint[0],
@@ -155,7 +226,6 @@ export function VenueViewportStage({
         scene.add(new THREE.Line(appGeo, appMat));
       }
 
-      // Draw baseline -> revised displacement vectors for any object moved by a patch
       for (const obj of snapshot.objects) {
         const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
         const dz = obj.transform.position[2] - obj.baselineTransform.position[2];
@@ -194,7 +264,6 @@ export function VenueViewportStage({
       }
     }
 
-    // Add 15x9 target sample grid & sightline rays when enabled
     if (showSightlineOverlays && selectedAttendeeId) {
       const { samplePoints, visibleMask } = computeAttendeeSampleVisibilityMask(
         snapshot,
@@ -212,7 +281,6 @@ export function VenueViewportStage({
         dot.position.set(pt[0], pt[1], pt[2] + 0.02);
         scene.add(dot);
 
-        // In overview mode, draw representative corner & center rays from attendee eye to screen
         if (
           viewMode === 'overview' &&
           (idx === 0 ||
@@ -241,83 +309,82 @@ export function VenueViewportStage({
         }
       });
     }
+  }, [
+    snapshot,
+    selectedAttendeeId,
+    viewMode,
+    evaluation,
+    showSightlineOverlays,
+  ]);
 
-    const camera = new THREE.PerspectiveCamera(
-      viewMode === 'attendee_pov' ? INSPECTION_CAMERA.fovDeg : 52,
-      viewMode === 'attendee_pov' ? INSPECTION_CAMERA.aspect : width / height,
-      INSPECTION_CAMERA.nearM,
-      INSPECTION_CAMERA.farM,
-    );
+  // 3. Camera & Render Effect: Runs at 60fps during orbit/zoom without recreating WebGLRenderer or Scene!
+  useEffect(() => {
+    const renderCurrentFrame = (): void => {
+      const container = containerRef.current;
+      const renderer = rendererRef.current;
+      const scene = sceneRef.current;
+      const camera = cameraRef.current;
+      if (!container || !renderer || !scene || !camera) return;
 
-    if (viewMode === 'attendee_pov' && selectedAttendeeId) {
-      try {
-        const pose = getAttendeeCameraPose(snapshot, selectedAttendeeId);
-        camera.position.set(
-          pose.eyePositionWorld[0],
-          pose.eyePositionWorld[1],
-          pose.eyePositionWorld[2],
-        );
-        camera.lookAt(
-          pose.lookAtWorld[0],
-          pose.lookAtWorld[1],
-          pose.lookAtWorld[2],
-        );
-        // Square 1:1 viewport framing for 90° x 90° inspection camera
-        const side = Math.min(width, height);
-        const offsetX = Math.floor((width - side) * 0.5);
-        const offsetY = Math.floor((height - side) * 0.5);
-        renderer.setScissorTest(true);
-        renderer.setViewport(offsetX, offsetY, side, side);
-        renderer.setScissor(offsetX, offsetY, side, side);
-      } catch {
-        // Fallback if attendee missing
-      }
-    } else {
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, width, height);
-      const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
-      const cx =
-        targetPivot.x +
-        orbitAngles.distanceM *
-          Math.sin(orbitAngles.polarRad) *
-          Math.sin(orbitAngles.azimuthRad);
-      const cy =
-        targetPivot.y + orbitAngles.distanceM * Math.cos(orbitAngles.polarRad);
-      const cz =
-        targetPivot.z +
-        orbitAngles.distanceM *
-          Math.sin(orbitAngles.polarRad) *
-          Math.cos(orbitAngles.azimuthRad);
-      camera.position.set(cx, cy, cz);
-      camera.lookAt(targetPivot);
-    }
+      const width = Math.max(320, container.clientWidth);
+      const height = Math.max(320, container.clientHeight);
+      renderer.setSize(width, height, false);
 
-    renderer.render(scene, camera);
-
-    const handleResize = (): void => {
-      if (!containerRef.current) return;
-      const w = Math.max(320, containerRef.current.clientWidth);
-      const h = Math.max(320, containerRef.current.clientHeight);
-      renderer.setSize(w, h);
-      if (viewMode === 'attendee_pov') {
-        const side = Math.min(w, h);
-        const ox = Math.floor((w - side) * 0.5);
-        const oy = Math.floor((h - side) * 0.5);
-        renderer.setScissorTest(true);
-        renderer.setViewport(ox, oy, side, side);
-        renderer.setScissor(ox, oy, side, side);
+      if (viewMode === 'attendee_pov' && selectedAttendeeId) {
+        try {
+          const pose = getAttendeeCameraPose(snapshot, selectedAttendeeId);
+          camera.fov = INSPECTION_CAMERA.fovDeg;
+          camera.aspect = INSPECTION_CAMERA.aspect;
+          camera.updateProjectionMatrix();
+          camera.position.set(
+            pose.eyePositionWorld[0],
+            pose.eyePositionWorld[1],
+            pose.eyePositionWorld[2],
+          );
+          camera.lookAt(
+            pose.lookAtWorld[0],
+            pose.lookAtWorld[1],
+            pose.lookAtWorld[2],
+          );
+          const side = Math.min(width, height);
+          const offsetX = Math.floor((width - side) * 0.5);
+          const offsetY = Math.floor((height - side) * 0.5);
+          renderer.setScissorTest(true);
+          renderer.setViewport(offsetX, offsetY, side, side);
+          renderer.setScissor(offsetX, offsetY, side, side);
+        } catch {
+          // Fallback if attendee missing
+        }
       } else {
-        camera.aspect = w / h;
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, width, height);
+        camera.fov = 52;
+        camera.aspect = width / height;
         camera.updateProjectionMatrix();
+
+        const targetPivot = new THREE.Vector3(0, 0.7, -0.5);
+        const cx =
+          targetPivot.x +
+          orbitAngles.distanceM *
+            Math.sin(orbitAngles.polarRad) *
+            Math.sin(orbitAngles.azimuthRad);
+        const cy =
+          targetPivot.y +
+          orbitAngles.distanceM * Math.cos(orbitAngles.polarRad);
+        const cz =
+          targetPivot.z +
+          orbitAngles.distanceM *
+            Math.sin(orbitAngles.polarRad) *
+            Math.cos(orbitAngles.azimuthRad);
+        camera.position.set(cx, cy, cz);
+        camera.lookAt(targetPivot);
       }
+
       renderer.render(scene, camera);
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      renderer.dispose();
-    };
+    renderFrameRef.current = renderCurrentFrame;
+    renderCurrentFrame();
   }, [
     snapshot,
     selectedAttendeeId,
@@ -438,8 +505,8 @@ export function VenueViewportStage({
             ...prev,
             azimuthRad: prev.azimuthRad - dx * 0.007,
             polarRad: Math.max(
-              0.25,
-              Math.min(1.42, prev.polarRad - dy * 0.007),
+              0.22,
+              Math.min(1.45, prev.polarRad - dy * 0.007),
             ),
           }));
         }}
@@ -455,7 +522,7 @@ export function VenueViewportStage({
             ...prev,
             distanceM: Math.max(
               3.2,
-              Math.min(13.5, prev.distanceM + e.deltaY * 0.005),
+              Math.min(24.0, prev.distanceM + e.deltaY * 0.006),
             ),
           }));
         }}
@@ -549,12 +616,15 @@ export function VenueViewportStage({
           )}
         </div>
 
-        {/* Fast camera jump pills */}
+        {/* Fast camera jump pills (scrollable so 24 seats never obscure the 3D scene) */}
         <div
           style={{
             display: 'flex',
             flexWrap: 'wrap',
-            gap: '6px',
+            gap: '5px',
+            maxWidth: '520px',
+            maxHeight: '72px',
+            overflowY: 'auto',
             background: 'var(--bg-glass)',
             backdropFilter: 'blur(8px)',
             padding: '6px',
@@ -571,7 +641,7 @@ export function VenueViewportStage({
                 key={m.attendeeId}
                 type="button"
                 className={`vp-btn ${active ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+                style={{ padding: '4px 8px', fontSize: '0.73rem' }}
                 onClick={() => onSelectAttendee?.(m.attendeeId)}
               >
                 <span>{m.assignedPlaceId.replace('place_', '')}</span>

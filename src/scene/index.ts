@@ -32,6 +32,7 @@ export {
 } from './preparedVenue.js';
 
 export {
+  generateSampleCustomAuditoriumGlb,
   parseAndLabelGlbVenue,
   type AutoLabeledGlbNode,
   type AutoLabeledNodeRole,

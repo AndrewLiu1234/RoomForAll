@@ -33,6 +33,7 @@ import {
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
   disposeVenueScene,
+  generateSampleCustomAuditoriumGlb,
   generateVenueGlbBinary,
   getActiveKeyframeAtTime,
   getOverviewCameraPose,
@@ -41,6 +42,10 @@ import {
   parseAndLabelGlbVenue,
   parseVenueGlbBinary,
 } from '../../src/scene/index.js';
+import {
+  computeAttendeeSampleVisibilityMask,
+  createLocalFixtureRepairPreviewRun,
+} from '../../src/ui/index.js';
 
 /**
  * Pure 3D segment vs axis-aligned box intersection test (Slab method) for verifying
@@ -779,5 +784,42 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     const evaluated = evaluateScene(report.snapshot);
     expect(evaluated.isValidStructure).toBe(true);
     expect(evaluated.occupiedCount).toBe(24);
+
+    // Verify Preview Repair on the GLB-parsed 24-place venue achieves 24/24 clear-and-usable
+    const previewRun24 = createLocalFixtureRepairPreviewRun(report.snapshot);
+    expect(previewRun24.bestEvaluation.allModeledRequirementsMet).toBe(true);
+    expect(
+      previewRun24.bestEvaluation.comparison.attendeesWithUnmetRequirements,
+    ).toBe(0);
+
+    // Verify 16-Place Civic Auditorium .glb auto-parsing and repair preview achieves 16/16 clear-and-usable
+    const customGlb = generateSampleCustomAuditoriumGlb();
+    const customReport = parseAndLabelGlbVenue(customGlb.glbBytes, {
+      fileName: customGlb.fileName,
+    });
+    expect(customReport.counts.seats).toBe(14);
+    expect(customReport.counts.wheelchairBays).toBe(2);
+    expect(customReport.snapshot.places).toHaveLength(16);
+
+    const previewRun16 = createLocalFixtureRepairPreviewRun(
+      customReport.snapshot,
+    );
+    expect(previewRun16.bestEvaluation.isValidStructure).toBe(true);
+    expect(previewRun16.bestEvaluation.allModeledRequirementsMet).toBe(true);
+    expect(
+      previewRun16.bestEvaluation.comparison.attendeesWithUnmetRequirements,
+    ).toBe(0);
+
+    // Verify UI 135-sample visibility mask matches Stream B evaluateScene visibleSamples for every attendee
+    for (const member of report.snapshot.roster) {
+      const maskRes = computeAttendeeSampleVisibilityMask(
+        report.snapshot,
+        member.attendeeId,
+      );
+      const visibleCount = maskRes.visibleMask.filter(Boolean).length;
+      expect(visibleCount).toBe(
+        evaluated.attendees[member.attendeeId]?.visibleSamples,
+      );
+    }
   });
 });

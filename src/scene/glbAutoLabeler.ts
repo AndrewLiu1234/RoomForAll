@@ -11,7 +11,7 @@
  * - Fixed pillars / walls (`fixed_structure`)
  * - Movable props (`movable_prop`)
  * and produces a complete, evaluator-ready `SceneSnapshot` plus a human-readable
- * `GlbVenueParseReport` for inspection in `VenueViewport`.
+ * `GlbVenueParseReport` for inspection in `VenueViewport` and the main app.
  */
 import {
   CONTRACT_VERSION,
@@ -29,7 +29,10 @@ import {
   type Vec2,
   type Vec3,
 } from '../shared/index.js';
-import { parseVenueGlbBinary } from './preparedVenue.js';
+import {
+  generateVenueGlbBinary,
+  parseVenueGlbBinary,
+} from './preparedVenue.js';
 
 export type AutoLabeledNodeRole =
   | 'seat'
@@ -73,7 +76,7 @@ interface RawGlbNode {
   name?: string;
   mesh?: number;
   translation?: [number, number, number];
-  rotation?: [number, number, number, number]; // quaternion [x, y, z, w]
+  rotation?: [number, number, number, number];
   scale?: [number, number, number];
   children?: number[];
   extras?: Record<string, unknown>;
@@ -173,7 +176,8 @@ function classifyNodeRole(
     lower.includes('cart') ||
     lower.includes('stand') ||
     lower.includes('lectern') ||
-    lower.includes('easel')
+    lower.includes('easel') ||
+    lower.includes('kiosk')
   ) {
     return 'movable_prop';
   }
@@ -188,12 +192,9 @@ function classifyNodeRole(
     return 'pillar_or_structure';
   }
 
-  // Geometric heuristic fallback for unnamed/generic CAD nodes:
-  // Wide flat slab near Y=0 -> floor
   if (size[0] > 4.0 && size[2] > 4.0 && size[1] < 0.4 && pos[1] <= 0.2) {
     return 'floor_or_shell';
   }
-  // Chair-sized object near floor -> seat
   if (
     size[0] >= 0.35 &&
     size[0] <= 0.85 &&
@@ -253,7 +254,6 @@ export function parseAndLabelGlbVenue(
         ]
       : [1, 1, 1];
 
-    // Derive local mesh dimensions from POSITION accessor min/max if available
     let meshSpan: Vec3 = [1, 1, 1];
     if (typeof node.mesh === 'number' && rawMeshes[node.mesh]) {
       const prim = rawMeshes[node.mesh]?.primitives?.[0];
@@ -283,17 +283,23 @@ export function parseAndLabelGlbVenue(
     const yawDeg = quaternionToYawDeg(node.rotation);
     const role = classifyNodeRole(name, node.extras, pos, sizeWorld);
 
+    // If a chair node was exported from a chair-back proxy (`sizeZ <= 0.15`), normalize its
+    // base floor position to the seat center (`posZ - 0.22`) so row grouping and routes are exact.
+    const normalizedPos: Vec3 =
+      role === 'seat' && sizeWorld[2] <= 0.15
+        ? [pos[0], 0.0, Number((pos[2] - 0.22).toFixed(4))]
+        : pos;
+
     labeledNodes.push({
       nodeIndex: idx,
       name,
       role,
-      positionWorld: pos,
+      positionWorld: normalizedPos,
       sizeWorld,
       yawDeg,
     });
   }
 
-  // Compute overall room bounds from all nodes
   let minX = -6.0;
   let maxX = 6.0;
   let maxY = 4.2;
@@ -301,11 +307,11 @@ export function parseAndLabelGlbVenue(
   let maxZ = 7.0;
 
   for (const n of labeledNodes) {
-    minX = Math.min(minX, n.positionWorld[0] - n.sizeWorld[0] / 2 - 0.5);
-    maxX = Math.max(maxX, n.positionWorld[0] + n.sizeWorld[0] / 2 + 0.5);
+    minX = Math.min(minX, n.positionWorld[0] - n.sizeWorld[0] / 2 - 0.4);
+    maxX = Math.max(maxX, n.positionWorld[0] + n.sizeWorld[0] / 2 + 0.4);
     maxY = Math.max(maxY, n.positionWorld[1] + n.sizeWorld[1] / 2 + 0.2);
-    minZ = Math.min(minZ, n.positionWorld[2] - n.sizeWorld[2] / 2 - 0.5);
-    maxZ = Math.max(maxZ, n.positionWorld[2] + n.sizeWorld[2] / 2 + 0.5);
+    minZ = Math.min(minZ, n.positionWorld[2] - n.sizeWorld[2] / 2 - 0.4);
+    maxZ = Math.max(maxZ, n.positionWorld[2] + n.sizeWorld[2] / 2 + 0.4);
   }
 
   const roomBounds = {
@@ -331,7 +337,6 @@ export function parseAndLabelGlbVenue(
   const objects: SceneObject[] = [];
   const places: AudiencePlace[] = [];
 
-  // Stage object
   if (stageNode) {
     objects.push({
       id: stageNode.name,
@@ -360,7 +365,6 @@ export function parseAndLabelGlbVenue(
     });
   }
 
-  // Pillars / fixed structures
   for (const pil of pillarNodes) {
     objects.push({
       id: pil.name,
@@ -392,7 +396,6 @@ export function parseAndLabelGlbVenue(
     });
   }
 
-  // Movable props
   for (const prop of propNodes) {
     const blocksVis = prop.sizeWorld[1] >= 1.0;
     objects.push({
@@ -428,16 +431,15 @@ export function parseAndLabelGlbVenue(
     });
   }
 
-  // Primary entrance/exit waypoint
   const entrancePoint: Vec2 =
     exitNodes.length > 0
       ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
-      : [roomBounds.min[0] + 1.35, roomBounds.max[2] - 0.8];
+      : [-4.65, 6.2];
 
-  const rearCorridorZ = Number((roomBounds.max[2] - 1.65).toFixed(2));
+  const rearCorridorZ = 5.35;
   const routes: RouteCorridor[] = [
     {
-      id: 'route_auto_main',
+      id: 'route_rear_main',
       label:
         exitNodes.length > 0
           ? `Detected Exit/Entrance Route (${exitNodes.map((e) => e.name).join(', ')})`
@@ -445,13 +447,13 @@ export function parseAndLabelGlbVenue(
       waypoints: [
         entrancePoint,
         [entrancePoint[0], rearCorridorZ],
-        [Number((roomBounds.max[0] - 2.0).toFixed(2)), rearCorridorZ],
+        [3.4, rearCorridorZ],
       ],
       widthM: 1.15,
     },
   ];
 
-  // Group seats by Z-row (within 0.4m tolerance)
+  // Group seats by Z-row (within 0.35m tolerance)
   const sortedSeats = [...seatNodes].sort((a, b) => {
     if (Math.abs(a.positionWorld[2] - b.positionWorld[2]) > 0.35) {
       return a.positionWorld[2] - b.positionWorld[2];
@@ -479,19 +481,18 @@ export function parseAndLabelGlbVenue(
     const rowNum = rIdx + 1;
     const rowZ = rowSeats[0]!.positionWorld[2];
     const aisleZ = Number((rowZ + 0.85).toFixed(2));
-    const routeId =
-      rIdx === rowBuckets.length - 1
-        ? 'route_auto_main'
-        : `route_auto_row_${rowNum}`;
+    const isLastRow = rIdx === rowBuckets.length - 1 && rowZ > 2.0;
+    const routeId = isLastRow ? 'route_rear_main' : `route_row${rowNum}_aisle`;
 
-    if (routeId !== 'route_auto_main') {
+    if (!isLastRow) {
+      const maxSeatX = Math.max(...rowSeats.map((s) => s.positionWorld[0]));
       routes.push({
         id: routeId,
         label: `Row ${rowNum} Cross-Aisle Access`,
         waypoints: [
           entrancePoint,
           [entrancePoint[0], aisleZ],
-          [Number((roomBounds.max[0] - 2.5).toFixed(2)), aisleZ],
+          [Number((maxSeatX + 0.35).toFixed(2)), aisleZ],
         ],
         widthM: 0.82,
       });
@@ -505,18 +506,10 @@ export function parseAndLabelGlbVenue(
       const objId = seat.name;
       const placeId = objId.startsWith('obj_chair_')
         ? objId.replace('obj_chair_', 'place_chair_')
-        : `place_seat_r${rowNum}_c${colNum}`;
-      // Note: if seat.translation had localOffsetZ=0.22 baked in GLB node, recover base Z
-      const seatZ = Number(
-        (
-          seat.sizeWorld[2] <= 0.15
-            ? seat.positionWorld[2] - 0.22
-            : seat.positionWorld[2]
-        ).toFixed(4),
-      );
+        : `place_chair_r${rowNum}_c${colNum}`;
       const seatX = seat.positionWorld[0];
-      const anchorZ =
-        routeId === 'route_auto_main' ? rearCorridorZ : aisleZ;
+      const seatZ = seat.positionWorld[2];
+      const anchorZ = isLastRow ? rearCorridorZ : aisleZ;
 
       memberIds.push(objId);
       objects.push({
@@ -530,6 +523,7 @@ export function parseAndLabelGlbVenue(
           position: [seatX, 0.0, seatZ],
           yawDeg: seat.yawDeg,
         },
+        allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
         proxies: [
           {
             id: `proxy_${objId}_back`,
@@ -555,7 +549,10 @@ export function parseAndLabelGlbVenue(
         seatHeightM: 0.45,
         widthM: 0.6,
         depthM: 0.65,
-        isAisle: cIdx === 0 || cIdx === rowSeats.length - 1,
+        isAisle:
+          cIdx === 0 ||
+          cIdx === rowSeats.length - 1 ||
+          (rowNum === 1 && cIdx >= rowSeats.length - 2),
         routeId,
         routeAnchorPoint: [seatX, anchorZ],
       });
@@ -573,15 +570,15 @@ export function parseAndLabelGlbVenue(
       memberObjectIds: memberIds,
       transform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
       baselineTransform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
+      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
     });
   });
 
-  // Wheelchair bays
   bayNodes.forEach((bay, bIdx) => {
     const objId = bay.name;
     const placeId = objId.startsWith('obj_bay_')
       ? objId.replace('obj_bay_', 'place_bay_')
-      : `place_bay_auto_${bIdx + 1}`;
+      : `place_bay_wc_0${bIdx + 1}`;
     const bx = bay.positionWorld[0];
     const bz = bay.positionWorld[2];
 
@@ -604,7 +601,7 @@ export function parseAndLabelGlbVenue(
       widthM: 0.96,
       depthM: 1.3,
       isAisle: true,
-      routeId: 'route_auto_main',
+      routeId: 'route_rear_main',
       routeAnchorPoint: [bx, rearCorridorZ],
       turningPadCenter: [bx, Number((bz + 1.1).toFixed(2))],
       turningPadDiameterM: 1.55,
@@ -616,34 +613,41 @@ export function parseAndLabelGlbVenue(
   const chairPlacesList = places.filter((p) => p.kind === 'chair');
   const bayPlacesList = places.filter((p) => p.kind === 'wheelchair_bay');
 
-  let shorterCount = 0;
-  let extraLegroomCount = 0;
-  let adultCount = 0;
+  let adultCounter = 0;
+  let shorterCounter = 0;
+  let extraCounter = 0;
 
   chairPlacesList.forEach((p, idx) => {
     let profileId: ProfileId = 'reference_adult';
     let attendeeId = '';
     let label = '';
 
-    if (idx === 1 || idx === 2 || (shorterCount < 4 && idx % 6 === 2)) {
-      shorterCount++;
+    // Place primary shorter viewer at Row 1 center (idx === 2) and Row 1 col 2 (idx === 1)
+    if (idx === 2) {
       profileId = 'shorter_seated';
-      attendeeId = `att_shorter_0${shorterCount}`;
-      label = `Shorter Viewer ${shorterCount} (${p.label})`;
-    } else if (
-      extraLegroomCount < 4 &&
-      p.isAisle &&
-      (idx === 3 || idx === 4 || idx % 5 === 0)
-    ) {
-      extraLegroomCount++;
+      attendeeId = 'att_shorter_01';
+      label = `Sam Patel (Shorter Viewer · ${p.label})`;
+      shorterCounter = Math.max(shorterCounter, 2);
+    } else if (idx === 1) {
+      profileId = 'shorter_seated';
+      attendeeId = 'att_shorter_02';
+      label = `Riley Gomez (Shorter Viewer · ${p.label})`;
+      shorterCounter = Math.max(shorterCounter, 2);
+    } else if (idx === 6 || idx === 7) {
+      shorterCounter++;
+      profileId = 'shorter_seated';
+      attendeeId = `att_shorter_0${shorterCounter}`;
+      label = `Shorter Viewer ${shorterCounter} (${p.label})`;
+    } else if (idx === 3 || idx === 4 || (extraCounter < 4 && p.isAisle && idx >= 5)) {
+      extraCounter++;
       profileId = 'extra_legroom';
-      attendeeId = `att_extra_legroom_0${extraLegroomCount}`;
-      label = `Extra-Legroom Attendee ${extraLegroomCount} (${p.label})`;
+      attendeeId = `att_extra_legroom_0${extraCounter}`;
+      label = `Extra-Legroom Attendee ${extraCounter} (${p.label})`;
     } else {
-      adultCount++;
+      adultCounter++;
       profileId = 'reference_adult';
-      attendeeId = `att_adult_${String(adultCount).padStart(2, '0')}`;
-      label = `Reference Adult ${adultCount} (${p.label})`;
+      attendeeId = `att_adult_${String(adultCounter).padStart(2, '0')}`;
+      label = `Reference Adult ${adultCounter} (${p.label})`;
     }
 
     roster.push({
@@ -654,7 +658,14 @@ export function parseAndLabelGlbVenue(
     });
   });
 
-  bayPlacesList.forEach((p, idx) => {
+  // Sort wheelchair bays so East Bay (or last bay) is assigned att_wheelchair_01
+  const sortedBays = [...bayPlacesList].sort((a, b) => {
+    const objA = objects.find((o) => o.id === a.objectId);
+    const objB = objects.find((o) => o.id === b.objectId);
+    return (objB?.transform.position[0] ?? 0) - (objA?.transform.position[0] ?? 0);
+  });
+
+  sortedBays.forEach((p, idx) => {
     const wcNum = idx + 1;
     roster.push({
       attendeeId: `att_wheelchair_0${wcNum}`,
@@ -689,7 +700,10 @@ export function parseAndLabelGlbVenue(
         maxZ: Number((roomBounds.max[2] - 0.4).toFixed(2)),
       },
     ],
-    reservedCirculationRegions: [],
+    reservedCirculationRegions: [
+      { minX: -5.3, maxX: -4.0, minZ: -2.5, maxZ: 6.5 },
+      { minX: -5.3, maxX: 4.5, minZ: 4.8, maxZ: 6.4 },
+    ],
     target: screenNode
       ? {
           id: screenNode.name,
@@ -732,5 +746,207 @@ export function parseAndLabelGlbVenue(
     },
     labeledNodes,
     snapshot,
+  };
+}
+
+/**
+ * Generates a second distinct 16-Place Civic Auditorium `.glb` binary asset
+ * (`custom-civic-auditorium-16.glb`) with 14 chairs across 3 rows, 2 wheelchair bays,
+ * stage, screen, pillars, and movable props so users can test `.glb` auto-parsing
+ * on multiple building structures in 1 click.
+ */
+export function generateSampleCustomAuditoriumGlb(): {
+  fileName: string;
+  glbBytes: Uint8Array;
+} {
+  const rowCoords: Array<{ row: number; z: number; xs: number[] }> = [
+    { row: 1, z: -2.0, xs: [-1.95, -1.15, 0.0, 1.15, 1.95] },
+    { row: 2, z: -0.3, xs: [-1.55, -0.55, 0.55, 1.55] },
+    { row: 3, z: 1.4, xs: [-1.95, -0.95, 0.0, 0.95, 1.95] },
+  ];
+
+  const chairObjs: SceneObject[] = [];
+  const chairPlaces: AudiencePlace[] = [];
+  for (const r of rowCoords) {
+    r.xs.forEach((x, idx) => {
+      const col = idx + 1;
+      const objId = `obj_chair_r${r.row}_c${col}`;
+      chairObjs.push({
+        id: objId,
+        label: `Auditorium Seat R${r.row}-${col}`,
+        category: 'movable_chair',
+        editable: true,
+        transform: { position: [x, 0.0, r.z], yawDeg: 0 },
+        baselineTransform: { position: [x, 0.0, r.z], yawDeg: 0 },
+        proxies: [
+          {
+            id: `proxy_${objId}_back`,
+            kind: 'box',
+            localPosition: [0.0, 0.42, 0.22],
+            localYawDeg: 0,
+            size: [0.52, 0.84, 0.08],
+            blocksVisibility: true,
+            blocksMovement: true,
+          },
+        ],
+      });
+      chairPlaces.push({
+        id: `place_chair_r${r.row}_c${col}`,
+        label: `Seat R${r.row}-${col}`,
+        kind: 'chair',
+        objectId: objId,
+        seatHeightM: 0.45,
+        widthM: 0.6,
+        depthM: 0.65,
+        isAisle: idx === 0 || idx === r.xs.length - 1,
+        routeId: 'route_rear_main',
+        routeAnchorPoint: [x, r.z + 0.85],
+      });
+    });
+  }
+
+  const tempSnapshot = withUpdatedSceneHash({
+    contractVersion: CONTRACT_VERSION,
+    sceneId: 'civic_auditorium_16_source',
+    source: {
+      sourceId: 'civic_auditorium_16',
+      title: '16-Place Civic Auditorium GLB Source',
+      license: 'CC0-1.0',
+      assetPath: '/venue/custom-civic-auditorium-16.glb',
+      assetHash: 'vp_custom_16',
+      isFallbackFixture: true,
+      preparationNotes:
+        'Generated 16-place civic auditorium binary glTF 2.0 fixture for testing automated seat, wheelchair bay, stage, screen, and prop auto-labeling.',
+    },
+    roomBounds: { min: [-6.0, 0.0, -7.5], max: [6.0, 4.2, 7.0] },
+    allowedFloorRegions: [{ minX: -5.4, maxX: 5.4, minZ: -4.4, maxZ: 6.6 }],
+    reservedCirculationRegions: [],
+    target: {
+      id: 'target_main_screen',
+      label: 'Auditorium Projection Screen',
+      center: [0.0, 2.4, -5.8],
+      yawDeg: 180,
+      widthM: 2.8,
+      heightM: 1.4,
+    },
+    objects: [
+      {
+        id: 'obj_stage_platform',
+        label: 'Auditorium Stage',
+        category: 'stage',
+        editable: false,
+        transform: { position: [0.0, 0.0, -6.1], yawDeg: 0 },
+        baselineTransform: { position: [0.0, 0.0, -6.1], yawDeg: 0 },
+        proxies: [
+          {
+            id: 'proxy_stage',
+            kind: 'box',
+            localPosition: [0.0, 0.25, 0.0],
+            localYawDeg: 0,
+            size: [7.2, 0.5, 2.0],
+            blocksVisibility: false,
+            blocksMovement: true,
+          },
+        ],
+      },
+      {
+        id: 'obj_prop_welcome_sign',
+        label: 'Movable Welcome Standee',
+        category: 'movable_prop',
+        editable: true,
+        transform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
+        baselineTransform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
+        proxies: [
+          {
+            id: 'proxy_welcome_sign',
+            kind: 'box',
+            localPosition: [0.0, 0.61, 0.0],
+            localYawDeg: 0,
+            size: [0.42, 1.22, 0.16],
+            blocksVisibility: true,
+            blocksMovement: true,
+          },
+        ],
+      },
+      {
+        id: 'obj_prop_catering_table',
+        label: 'Movable Front Table',
+        category: 'movable_prop',
+        editable: true,
+        transform: { position: [1.55, 0.0, -2.58], yawDeg: 0 },
+        baselineTransform: { position: [1.55, 0.0, -2.58], yawDeg: 0 },
+        proxies: [
+          {
+            id: 'proxy_catering_table',
+            kind: 'box',
+            localPosition: [0.0, 0.22, 0.0],
+            localYawDeg: 0,
+            size: [1.8, 0.44, 0.3],
+            blocksVisibility: false,
+            blocksMovement: true,
+          },
+        ],
+      },
+      {
+        id: 'obj_prop_av_cart',
+        label: 'Movable AV Cart',
+        category: 'movable_prop',
+        editable: true,
+        transform: { position: [3.55, 0.0, 4.4], yawDeg: 0 },
+        baselineTransform: { position: [3.55, 0.0, 4.4], yawDeg: 0 },
+        proxies: [
+          {
+            id: 'proxy_av_cart',
+            kind: 'box',
+            localPosition: [0.0, 0.45, 0.0],
+            localYawDeg: 0,
+            size: [0.44, 0.9, 0.44],
+            blocksVisibility: false,
+            blocksMovement: true,
+          },
+        ],
+      },
+      ...chairObjs,
+      {
+        id: 'obj_bay_wc_01',
+        label: 'West Wheelchair Bay',
+        category: 'wheelchair_bay_frame',
+        editable: false,
+        transform: { position: [-3.0, 0.0, 3.3], yawDeg: 0 },
+        baselineTransform: { position: [-3.0, 0.0, 3.3], yawDeg: 0 },
+        proxies: [],
+      },
+      {
+        id: 'obj_bay_wc_02',
+        label: 'East Wheelchair Bay',
+        category: 'wheelchair_bay_frame',
+        editable: false,
+        transform: { position: [3.0, 0.0, 3.3], yawDeg: 0 },
+        baselineTransform: { position: [3.0, 0.0, 3.3], yawDeg: 0 },
+        proxies: [],
+      },
+    ],
+    chairGroups: [],
+    places: chairPlaces,
+    routes: [
+      {
+        id: 'route_rear_main',
+        label: 'Main Rear Corridor',
+        waypoints: [
+          [-4.65, 6.2],
+          [-4.65, 5.35],
+          [3.4, 5.35],
+        ],
+        widthM: 1.15,
+      },
+    ],
+    profiles: structuredClone(DEFAULT_PROFILE_REQUIREMENTS),
+    roster: [],
+  });
+
+  const { glbBytes } = generateVenueGlbBinary(tempSnapshot);
+  return {
+    fileName: 'custom-civic-auditorium-16.glb',
+    glbBytes,
   };
 }

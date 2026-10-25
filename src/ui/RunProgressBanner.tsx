@@ -4,14 +4,19 @@ import {
   type RunRecord,
   type RunState,
 } from '../shared/index.js';
+import type { GlbVenueParseReport } from '../scene/index.js';
+
+export type VenuePresetMode = 'prepared_24' | 'dev_4' | 'custom_glb';
 
 export interface RunProgressBannerProps {
   activeRun: RunRecord | null;
   isCapturingClip: boolean;
   captureStatusText: string | null;
   errorText: string | null;
-  venuePreset?: 'prepared_24' | 'dev_4';
-  onSelectVenuePreset?: (preset: 'prepared_24' | 'dev_4') => void;
+  venuePreset?: VenuePresetMode;
+  glbParseReport?: GlbVenueParseReport | null;
+  onSelectVenuePreset?: (preset: VenuePresetMode) => void;
+  onUploadGlbFile?: (file: File) => void;
   onStartLiveRun: () => void;
   onPreviewLocalRepair: () => void;
   onResetToBaseline: () => void;
@@ -34,7 +39,9 @@ export function RunProgressBanner({
   captureStatusText,
   errorText,
   venuePreset = 'prepared_24',
+  glbParseReport,
   onSelectVenuePreset,
+  onUploadGlbFile,
   onStartLiveRun,
   onPreviewLocalRepair,
   onResetToBaseline,
@@ -113,7 +120,14 @@ export function RunProgressBanner({
         </div>
 
         {/* Action Buttons & Live Timer */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            flexWrap: 'wrap',
+          }}
+        >
           {onSelectVenuePreset && (
             <div
               style={{
@@ -136,6 +150,16 @@ export function RunProgressBanner({
               </button>
               <button
                 type="button"
+                className={`vp-btn ${venuePreset === 'custom_glb' ? 'vp-btn-primary' : ''}`}
+                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
+                disabled={isRunning || isCapturingClip}
+                onClick={() => onSelectVenuePreset('custom_glb')}
+                title="Parse and auto-label seats, wheelchair bays, exits, stage, and props from a 16-place Civic Auditorium .glb model"
+              >
+                16-Place Civic Auditorium (.glb)
+              </button>
+              <button
+                type="button"
                 className={`vp-btn ${venuePreset === 'dev_4' ? 'vp-btn-primary' : ''}`}
                 style={{ padding: '4px 9px', fontSize: '0.73rem' }}
                 disabled={isRunning || isCapturingClip}
@@ -143,6 +167,33 @@ export function RunProgressBanner({
               >
                 4-Place Compact Hall
               </button>
+              {onUploadGlbFile && (
+                <label
+                  className="vp-btn"
+                  style={{
+                    padding: '4px 9px',
+                    fontSize: '0.73rem',
+                    cursor: isRunning || isCapturingClip ? 'default' : 'pointer',
+                    borderColor: 'rgba(167, 139, 250, 0.45)',
+                    color: '#c4b5fd',
+                  }}
+                  title="Upload any binary glTF 2.0 (.glb) 3D building to auto-parse and label seats, wheelchair bays, exits, stage, and props"
+                >
+                  Upload .glb Building
+                  <input
+                    type="file"
+                    accept=".glb"
+                    disabled={isRunning || isCapturingClip}
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        onUploadGlbFile(file);
+                      }
+                    }}
+                  />
+                </label>
+              )}
             </div>
           )}
 
@@ -162,7 +213,13 @@ export function RunProgressBanner({
                 Elapsed: {(activeRun.elapsedMs / 1000).toFixed(1)}s
               </span>
               <span style={{ color: 'var(--text-muted)' }}>|</span>
-              <span className="mono" style={{ color: remainingSec < 20 ? '#f87171' : 'var(--text-secondary)' }}>
+              <span
+                className="mono"
+                style={{
+                  color:
+                    remainingSec < 20 ? '#f87171' : 'var(--text-secondary)',
+                }}
+              >
                 Budget: {remainingSec}s / 110s
               </span>
             </div>
@@ -174,7 +231,9 @@ export function RunProgressBanner({
             disabled={isRunning || isCapturingClip}
             onClick={onStartLiveRun}
           >
-            {isRunning ? 'Live Run in Progress…' : 'Review and Improve (Live API)'}
+            {isRunning
+              ? 'Live Run in Progress…'
+              : 'Review and Improve (Live API)'}
           </button>
 
           <button
@@ -182,9 +241,9 @@ export function RunProgressBanner({
             className="vp-btn"
             disabled={isRunning || isCapturingClip}
             onClick={onPreviewLocalRepair}
-            title="Test Before/After comparison using the deterministic devFixture sign repair while Stream C backend is a stub"
+            title="Test Before/After comparison using the deterministic reference repair patch"
           >
-            Preview Repair (Dev Fixture)
+            Preview Repair
           </button>
 
           {activeRun && (
@@ -199,6 +258,52 @@ export function RunProgressBanner({
         </div>
       </div>
 
+      {/* GLB Auto-Labeler Summary Strip (shown when viewing an auto-parsed .glb venue) */}
+      {glbParseReport && venuePreset === 'custom_glb' && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            padding: '6px 12px',
+            borderRadius: 'var(--radius-inner)',
+            background: 'rgba(139, 92, 246, 0.14)',
+            border: '1px solid rgba(167, 139, 250, 0.35)',
+            fontSize: '0.74rem',
+            color: '#e9d5ff',
+          }}
+        >
+          <div>
+            <strong>GLB Building Auto-Labeler:</strong>{' '}
+            <code>{glbParseReport.fileName}</code> ({glbParseReport.byteLength}{' '}
+            bytes · {glbParseReport.totalNodes} 3D nodes)
+          </div>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <span>
+              Seats: <strong>{glbParseReport.counts.seats}</strong>
+            </span>
+            <span>
+              Wheelchair Bays:{' '}
+              <strong>{glbParseReport.counts.wheelchairBays}</strong>
+            </span>
+            <span>
+              Synthesized Corridors:{' '}
+              <strong>{glbParseReport.snapshot.routes.length}</strong>
+            </span>
+            <span>
+              Stage/Screen:{' '}
+              <strong>{glbParseReport.counts.stagesAndScreens}</strong>
+            </span>
+            <span>
+              Movable Props:{' '}
+              <strong>{glbParseReport.counts.movableProps}</strong>
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* 8-State Pipeline Bar */}
       <div
         style={{
@@ -209,7 +314,8 @@ export function RunProgressBanner({
       >
         {ORDERED_STATES.map((step, idx) => {
           const isCurrent = activeRun?.state === step.state;
-          const isCompleted = currentIdx > idx || activeRun?.state === 'finished';
+          const isCompleted =
+            currentIdx > idx || activeRun?.state === 'finished';
 
           return (
             <div
