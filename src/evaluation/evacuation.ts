@@ -73,14 +73,25 @@ export function getVenueExitPortals(snapshot: SceneSnapshot): VenueExitPortal[] 
     },
   ];
 
-  // For the 24-place community hall (or larger rooms width >= 9m), include the East Secondary Emergency Exit
+  // For the 24-place community hall (or larger rooms width >= 9m), include secondary emergency exits
   if (maxX - minX >= 9.0) {
     portals.push({
       id: 'exit_emergency_east',
-      label: 'East Secondary Emergency Exit',
+      label: 'East Secondary Emergency Exit (Low Level)',
       position: [maxX - 0.65, 3.85],
+      elevationM: 0.0,
       widthM: 1.25,
       yawDeg: -90,
+      isEmergencyExit: true,
+    });
+
+    portals.push({
+      id: 'exit_wheelchair_terrace',
+      label: 'Rear Wheelchair Terrace Emergency Exit (High Level)',
+      position: [0.0, maxZ - 0.65],
+      elevationM: 0.30,
+      widthM: 1.6,
+      yawDeg: 0,
       isEmergencyExit: true,
     });
   }
@@ -278,6 +289,11 @@ function getBaseWalkingSpeed(
 
 /**
  * Builds the deterministic waypoint chain from an attendee's seat to the optimal active exit portal.
+ * In a tiered auditorium:
+ * - Attendees extricate by stepping forward onto their SAME level platform (never stepping backward onto a higher tier).
+ * - They walk laterally along their tier platform to the outside aisle ramp corridor.
+ * - If on the elevated rear wheelchair terrace, wheelchair users evacuate directly through the terrace emergency exit.
+ * - Otherwise, attendees safely descend along the outside ramps to the front floor exits (never jumping down).
  */
 function buildAgentEgressWaypoints(
   seatPos: Vec2,
@@ -288,62 +304,77 @@ function buildAgentEgressWaypoints(
   const usableExits = resolvedExits.filter((e) => !e.isBlocked);
   const candidateExits = usableExits.length > 0 ? usableExits : resolvedExits;
 
-  // Choose the exit that minimizes weighted travel distance from routeAnchorPoint
-  const anchor = place.routeAnchorPoint;
+  // 1. Exit Selection
   let bestExit = candidateExits[0]!;
-  let bestScore = Infinity;
+  const isTerraceSeat = place.kind === 'wheelchair_bay' || seatPos[1] >= 2.25;
 
-  for (const exit of candidateExits) {
-    const distFromSeat = Math.hypot(
-      exit.position[0] - seatPos[0],
-      exit.position[1] - seatPos[1],
-    );
-    const distFromAnchor = Math.hypot(
-      exit.position[0] - anchor[0],
-      exit.position[1] - anchor[1],
-    );
-    // Narrower exits have a small impedance penalty
-    const widthPenalty = exit.effectiveWidthM > 0 ? 1.2 / exit.effectiveWidthM : 10;
-    const score = (distFromSeat * 0.4 + distFromAnchor * 0.6) * widthPenalty;
-    if (score < bestScore) {
-      bestScore = score;
-      bestExit = exit;
+  if (isTerraceSeat) {
+    // Wheelchair bays and top tier preferentially use the level wheelchair terrace exit if available
+    const terraceExit = candidateExits.find((e) => e.id === 'exit_wheelchair_terrace');
+    if (terraceExit) {
+      bestExit = terraceExit;
+    } else {
+      let bestDist = Infinity;
+      for (const exit of candidateExits) {
+        const d = Math.hypot(exit.position[0] - seatPos[0], exit.position[1] - seatPos[1]);
+        if (d < bestDist) {
+          bestDist = d;
+          bestExit = exit;
+        }
+      }
+    }
+  } else {
+    // For tiered seats below terrace level, choose the most balanced low-level exit
+    let bestScore = Infinity;
+    for (const exit of candidateExits) {
+      // Exclude high terrace exit for lower rows to prevent climbing backwards
+      if (exit.id === 'exit_wheelchair_terrace') continue;
+      const dist = Math.hypot(exit.position[0] - seatPos[0], exit.position[1] - seatPos[1]);
+      const widthPenalty = exit.effectiveWidthM > 0 ? 1.2 / exit.effectiveWidthM : 10;
+      const score = dist * widthPenalty;
+      if (score < bestScore) {
+        bestScore = score;
+        bestExit = exit;
+      }
     }
   }
 
   const waypoints: Vec2[] = [];
 
-  // 1. Step forward/backward into the row cross-aisle Z before moving laterally to aisle anchor
-  const rowAislePoint: Vec2 = [seatPos[0], anchor[1]];
-  if (Math.hypot(rowAislePoint[0] - seatPos[0], rowAislePoint[1] - seatPos[1]) > 0.15) {
-    waypoints.push(rowAislePoint);
+  // 2. Extrication: step forward into the foot-aisle on the SAME tier platform (never backward onto higher tier)
+  const isRow1 = seatPos[1] <= -1.15;
+  const isRow4Terrace = seatPos[1] >= 2.25;
+  const sameTierAisleZ = isRow4Terrace ? seatPos[1] : seatPos[1] - 0.25;
+
+  if (Math.abs(sameTierAisleZ - seatPos[1]) > 0.05) {
+    waypoints.push([seatPos[0], sameTierAisleZ]);
   }
 
-  // 2. If routing to East Secondary Emergency Exit and seat is on the east side, head toward the east perimeter aisle
-  if (bestExit.id === 'exit_emergency_east' && seatPos[0] >= -0.2) {
-    const eastAisleX = Math.min(
-      snapshot.roomBounds.max[0] - 0.95,
-      bestExit.position[0] - 0.45,
-    );
-    waypoints.push([eastAisleX, anchor[1]]);
+  // 3. Routing to High-Level Wheelchair Terrace Exit
+  if (bestExit.id === 'exit_wheelchair_terrace') {
+    // Already on the terrace level, route directly along the terrace to the door
+    waypoints.push([seatPos[0], Math.max(seatPos[1], 4.20)]);
     waypoints.push([bestExit.position[0], bestExit.position[1]]);
     return { waypoints, targetExitId: bestExit.id };
   }
 
-  // 3. Standard route via place.routeAnchorPoint and route corridor waypoints
-  waypoints.push([anchor[0], anchor[1]]);
+  // 4. Routing via Outside Aisle Ramps (Down to Low-Level Exits)
+  // Outside ramp corridors are at X = -3.65 (West) and X = +3.65 (East)
+  const isWest = seatPos[0] < 0 || bestExit.position[0] < 0;
+  const rampX = isWest ? -3.65 : 3.65;
+  const rampFloorZ = -2.35; // Front floor landing of the ramp
 
-  const route = snapshot.routes.find((r) => r.id === place.routeId);
-  if (route && route.waypoints.length >= 2) {
-    // Route waypoints in SceneSnapshot are ordered from Entrance [0] -> Interior [last].
-    // For egress, walk toward waypoint[0] (or toward bestExit).
-    const entranceWp = route.waypoints[0]!;
-    const midWp: Vec2 = [entranceWp[0], anchor[1]];
-    if (Math.hypot(midWp[0] - anchor[0], midWp[1] - anchor[1]) > 0.25) {
-      waypoints.push(midWp);
-    }
+  if (!isRow1) {
+    // Elevated tiers (Row 2, 3, 4): Walk laterally on current platform to the ramp corridor
+    waypoints.push([rampX, sameTierAisleZ]);
+    // Walk down along and on top of the ramp to the front ground floor landing
+    waypoints.push([rampX, rampFloorZ]);
+  } else {
+    // Row 1 is already at the base floor level: step out to the front corridor
+    waypoints.push([rampX, rampFloorZ]);
   }
 
+  // 5. From the front floor landing, walk directly to the chosen exit portal
   waypoints.push([bestExit.position[0], bestExit.position[1]]);
   return { waypoints, targetExitId: bestExit.id };
 }

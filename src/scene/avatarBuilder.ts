@@ -277,8 +277,8 @@ export function createArticulatedAvatarMesh(
   if (profileId === 'wheelchair_user') {
     const wcGroup = new THREE.Group();
     wcGroup.name = 'avatar_wheelchair_assembly';
-    // Position relative to torsoBox.centerWorld so wheels rest on the floor (y = -torsoBox.centerWorld[1])
-    const floorOffsetY = -torsoBox.centerWorld[1];
+    // Position relative to torsoBox center so wheels rest on the elevated platform surface
+    const floorOffsetY = -torsoBox.size[1] * 0.5;
 
     const frameMat = new THREE.MeshStandardMaterial({
       color: cleanForEvidenceCapture ? 0x475569 : 0x1e293b,
@@ -376,6 +376,49 @@ export function createArticulatedAvatarMesh(
 }
 
 /**
+ * Deterministically computes the physical ground/platform/ramp surface elevation Y at [x, z].
+ * This ensures articulated avatars and wheelchairs continuously walk/roll ON TOP of the
+ * stepped platforms and along the slope of the outside ramps without floating or jumping down.
+ */
+export function getVenueSurfaceElevationAt(x: number, z: number): number {
+  const isWestRamp = x <= -3.15;
+  const isEastRamp = x >= 3.15;
+
+  // 1. Outside Accessible Ramps (X <= -3.15 or X >= 3.15, from Z = -2.35 to Z = 3.30)
+  if (isWestRamp || isEastRamp) {
+    const rampStartZ = -2.35;
+    const rampEndZ = 3.30;
+    const topElevation = 0.30;
+
+    if (z <= rampStartZ) {
+      return 0.0;
+    }
+    if (z >= rampEndZ) {
+      return topElevation;
+    }
+    const frac = (z - rampStartZ) / (rampEndZ - rampStartZ);
+    return Math.max(0.0, Math.min(topElevation, frac * topElevation));
+  }
+
+  // 2. Seating Platform Tiers (Row 1 to Row 4)
+  if (z >= 2.25) {
+    return 0.30; // Row 4 & Accessible Terrace
+  }
+  if (z >= 0.55) {
+    return 0.20; // Row 3 Tier
+  }
+  if (z >= -1.15) {
+    return 0.10; // Row 2 Tier
+  }
+  if (z >= -2.60) {
+    return 0.04; // Row 1 Base Tier
+  }
+
+  // 3. Ground Floor (Front stage area / corridors)
+  return 0.0;
+}
+
+/**
  * Updates an articulated attendee avatar's world position, yaw, and limb/wheel animation cycle
  * for a given `EvacuationAgentFrameState` (or resets to seated pose when `agentState` is undefined).
  */
@@ -439,17 +482,22 @@ export function updateAvatarAnimationPose(
 
   proxyGroup.visible = true;
   const isWheelchair = profileId === 'wheelchair_user';
-  // Standing height lift (+0.18m above seated torso center) for walking profiles
-  const standingLiftM = isWheelchair ? 0 : 0.18;
   const strideFreq = Math.max(2.5, agentState.speedMps * 4.8);
   const phase = elapsedSec * strideFreq;
   const bobM = isWheelchair
     ? 0
     : Math.abs(Math.sin(phase)) * Math.min(0.035, agentState.speedMps * 0.022);
 
+  const surfaceElevation = getVenueSurfaceElevationAt(
+    agentState.position[0],
+    agentState.position[1],
+  );
+  // Standing torso center is 1.05m above surface; wheelchair seated torso center is 0.625m above surface
+  const torsoBaseOffset = isWheelchair ? 0.625 : 1.05;
+
   rootMesh.position.set(
     agentState.position[0],
-    baseCenterWorld[1] + standingLiftM + bobM,
+    surfaceElevation + torsoBaseOffset + bobM,
     agentState.position[1],
   );
   rootMesh.rotation.y = agentState.yawDeg * DEG_TO_RAD;
@@ -516,7 +564,7 @@ export function buildVenueExitPortalNodes(snapshot: SceneSnapshot): THREE.Group 
   for (const portal of portals) {
     const group = new THREE.Group();
     group.name = `portal_${portal.id}`;
-    group.position.set(portal.position[0], 0, portal.position[1]);
+    group.position.set(portal.position[0], portal.elevationM ?? 0, portal.position[1]);
     group.rotation.y = portal.yawDeg * DEG_TO_RAD;
 
     const doorW = portal.widthM;

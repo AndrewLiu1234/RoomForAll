@@ -78,6 +78,7 @@ export {
 export {
   buildVenueExitPortalNodes,
   createArticulatedAvatarMesh,
+  getVenueSurfaceElevationAt,
   updateAvatarAnimationPose,
 } from './avatarBuilder.js';
 

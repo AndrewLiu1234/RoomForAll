@@ -13,6 +13,7 @@ import {
   type Vec3,
 } from '../shared/index.js';
 import { validateSceneStructure } from './structural.js';
+import { getVenueExitPortals } from './evacuation.js';
 
 const STEP_TOLERANCE = 1e-4;
 
@@ -217,6 +218,33 @@ export function applyAndValidatePatch(
         message: `Operation on ${op.targetId} exceeds maxYawDeltaDeg (${PATCH_CONSTRAINTS.maxYawDeltaDeg}°): deltaYawDeg=${op.deltaYawDeg}.`,
         targetId: op.targetId,
       });
+      continue;
+    }
+
+    if (op.targetType === 'exit') {
+      if (!nextSnapshot.exits) {
+        nextSnapshot.exits = structuredClone(getVenueExitPortals(nextSnapshot));
+      }
+      const portal = nextSnapshot.exits.find((e) => e.id === op.targetId);
+      if (!portal) {
+        errors.push({
+          code: 'MISSING_REFERENCE',
+          message: `Patch target exit ${op.targetId} does not exist.`,
+          targetId: op.targetId,
+        });
+        continue;
+      }
+
+      portal.position = [
+        snap4(portal.position[0] + dx),
+        snap4(portal.position[1] + dz),
+      ];
+      if (Math.abs(dy) > 0.01) {
+        portal.elevationM = snap4((portal.elevationM ?? 0) + dy);
+      }
+      if (Math.abs(op.deltaYawDeg) > 0.1) {
+        portal.yawDeg = snap4(portal.yawDeg + op.deltaYawDeg);
+      }
       continue;
     }
 

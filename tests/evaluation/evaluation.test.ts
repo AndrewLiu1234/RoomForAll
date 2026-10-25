@@ -12,7 +12,12 @@ import {
   applyAndValidatePatch,
   compareEvaluations,
   evaluateScene,
+  simulateEvacuation,
 } from '../../src/evaluation/index.js';
+import {
+  createPreparedVenueSnapshot,
+  getVenueSurfaceElevationAt,
+} from '../../src/scene/index.js';
 
 function makePatch(
   parentSceneHash: string,
@@ -861,6 +866,53 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
             e.message.includes('obstructs the accessible wheelchair ramp corridor'),
         ),
       ).toBe(true);
+    });
+
+    it('routes wheelchair users directly to the high-level wheelchair terrace exit in prepared venue', () => {
+      const snap = createPreparedVenueSnapshot();
+      const sim = simulateEvacuation(snap, 'emergency_evacuation');
+      expect(sim.frames.length).toBeGreaterThan(0);
+      // Both wheelchair attendees should target the rear terrace exit
+      const lastFrame = sim.frames[sim.frames.length - 1]!;
+      const wc01 = lastFrame.agents['att_wheelchair_01'];
+      const wc02 = lastFrame.agents['att_wheelchair_02'];
+      expect(wc01?.targetExitId).toBe('exit_wheelchair_terrace');
+      expect(wc02?.targetExitId).toBe('exit_wheelchair_terrace');
+    });
+
+    it('allows patching exit portal positions via targetType: exit in applyAndValidatePatch', () => {
+      const baseline = createPreparedVenueSnapshot();
+      const patch = makePatch(baseline.sceneHash, [
+        {
+          targetType: 'exit',
+          targetId: 'exit_main_west',
+          deltaPositionM: [0, 0, -0.40],
+          deltaYawDeg: 0,
+          reason: 'Shift west low-level exit forward to optimize egress time',
+        },
+      ]);
+
+      const result = applyAndValidatePatch(baseline, baseline, patch);
+      expect(result.valid).toBe(true);
+      expect(result.snapshot?.exits).toBeDefined();
+      const updatedExit = result.snapshot!.exits!.find((e) => e.id === 'exit_main_west')!;
+      expect(updatedExit.position[1]).toBeCloseTo(-2.20, 2);
+    });
+
+    it('computes continuous 3D surface elevations along ramps and stepped tiers via getVenueSurfaceElevationAt', () => {
+      // Platform tiers:
+      expect(getVenueSurfaceElevationAt(0, -2.0)).toBe(0.04); // Row 1
+      expect(getVenueSurfaceElevationAt(0, -0.3)).toBe(0.10); // Row 2
+      expect(getVenueSurfaceElevationAt(0, 1.4)).toBe(0.20);  // Row 3
+      expect(getVenueSurfaceElevationAt(0, 3.3)).toBe(0.30);  // Row 4 / Terrace
+
+      // Outside accessible ramp corridor (e.g. West at X = -3.65m):
+      expect(getVenueSurfaceElevationAt(-3.65, -2.40)).toBe(0.0); // Below ramp start
+      expect(getVenueSurfaceElevationAt(-3.65, 3.35)).toBe(0.30); // Above ramp top
+      // Mid-ramp slope interpolation:
+      const midElevation = getVenueSurfaceElevationAt(-3.65, 0.475);
+      expect(midElevation).toBeGreaterThan(0.10);
+      expect(midElevation).toBeLessThan(0.20);
     });
   });
 });
