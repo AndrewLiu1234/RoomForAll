@@ -9,51 +9,128 @@
  */
 import {
   CONTRACT_VERSION,
-  VISIBILITY_CLEAR_MIN_SAMPLES,
   VISIBILITY_TOTAL_SAMPLES,
-  getAttendeeCameraPose,
+  getTargetSamplePointsWorld,
   type AttendeeEvaluation,
   type Evaluation,
-  type EvaluationComparisonResult,
-  type LayoutPatch,
-  type PatchValidationResult,
   type ProfileId,
   type ProfileSummaryMetrics,
   type SceneSnapshot,
 } from '../shared/index.js';
+import { buildSceneAccessContext, evaluateAttendeeAccess } from './access.js';
+import { applyAndValidatePatch, compareEvaluations } from './patch.js';
+import { validateSceneStructure } from './structural.js';
+import { evaluateAttendeeVisibility } from './visibility.js';
+
+export * from './geometry.js';
+export * from './structural.js';
+export * from './visibility.js';
+export * from './access.js';
+export { applyAndValidatePatch, compareEvaluations };
 
 /**
- * Evaluates a `SceneSnapshot` deterministically.
- * Stream B replaces the placeholder geometric checks with full 15x9 raycasting,
- * corridor/final-approach clearance, footprint/legroom, and structural checks.
+ * Evaluates a `SceneSnapshot` deterministically:
+ * - Structural validation (`isValidStructure`, `structuralErrors`)
+ * - 15x9 sampled sightline raycasting against finite-height 3D box/cylinder occluders and attendee torso proxies
+ * - Footprint fit, front legroom, turning space, fixed route corridor, and dynamic final-approach checks
+ * - Per-profile and comparison aggregations
  */
 export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
+  const structuralErrors = validateSceneStructure(snapshot);
+  const isValidStructure = structuralErrors.length === 0;
+  const hasMalformedGeometry = structuralErrors.some(
+    (e) => e.code === 'MALFORMED_GEOMETRY',
+  );
+
   const attendees: Record<string, AttendeeEvaluation> = {};
+  const placeMap = new Map(snapshot.places.map((p) => [p.id, p]));
+  const objectMap = new Map(snapshot.objects.map((o) => [o.id, o]));
+
+  const samplePoints = !hasMalformedGeometry
+    ? getTargetSamplePointsWorld(snapshot.target)
+    : [];
+  const accessContext = !hasMalformedGeometry
+    ? buildSceneAccessContext(snapshot)
+    : undefined;
 
   for (const member of snapshot.roster) {
-    const pose = getAttendeeCameraPose(snapshot, member.attendeeId);
-    const visibleSamples = VISIBILITY_TOTAL_SAMPLES;
-    const isViewClear = visibleSamples >= VISIBILITY_CLEAR_MIN_SAMPLES;
+    const profile = snapshot.profiles[member.profileId];
+    const place = placeMap.get(member.assignedPlaceId);
+    const obj = place ? objectMap.get(place.objectId) : undefined;
+
+    if (hasMalformedGeometry || !profile || !place || !obj) {
+      attendees[member.attendeeId] = {
+        attendeeId: member.attendeeId,
+        profileId: member.profileId,
+        placeId: member.assignedPlaceId,
+        eyePositionWorld: [0, 0, 0],
+        lookDirectionWorld: [0, 0, -1],
+        visibleSamples: 0,
+        totalSamples: VISIBILITY_TOTAL_SAMPLES,
+        sampledVisibility: 0,
+        isViewClear: false,
+        routeStatus: 'blocked',
+        footprintFitPass: false,
+        legroomPass: false,
+        turningSpacePass: false,
+        usable: false,
+        clearAndUsable: false,
+        failedRequirements: [
+          'accessible_route',
+          'footprint_fit',
+          'front_legroom',
+          'turning_space',
+          'clear_view',
+        ],
+        optionalPreferenceNotes: [],
+        primaryBlockerIds: [],
+      };
+      continue;
+    }
+
+    const vis = evaluateAttendeeVisibility(
+      snapshot,
+      member.attendeeId,
+      obj.id,
+      obj.transform.yawDeg,
+      samplePoints,
+    );
+
+    const acc = evaluateAttendeeAccess(
+      snapshot,
+      place,
+      obj,
+      profile,
+      accessContext,
+    );
+
+    const failedRequirements = [...acc.failedAccessRequirements];
+    if (!vis.isViewClear) {
+      failedRequirements.push('clear_view');
+    }
+
+    const usable = acc.usable;
+    const clearAndUsable = usable && vis.isViewClear;
 
     attendees[member.attendeeId] = {
       attendeeId: member.attendeeId,
       profileId: member.profileId,
-      placeId: member.assignedPlaceId,
-      eyePositionWorld: pose.eyePositionWorld,
-      lookDirectionWorld: pose.lookDirectionWorld,
-      visibleSamples,
-      totalSamples: VISIBILITY_TOTAL_SAMPLES,
-      sampledVisibility: visibleSamples / VISIBILITY_TOTAL_SAMPLES,
-      isViewClear,
-      routeStatus: 'clear',
-      footprintFitPass: true,
-      legroomPass: true,
-      turningSpacePass: true,
-      usable: true,
-      clearAndUsable: isViewClear,
-      failedRequirements: [],
-      optionalPreferenceNotes: [],
-      primaryBlockerIds: [],
+      placeId: place.id,
+      eyePositionWorld: vis.eyePositionWorld,
+      lookDirectionWorld: vis.lookDirectionWorld,
+      visibleSamples: vis.visibleSamples,
+      totalSamples: vis.totalSamples,
+      sampledVisibility: vis.sampledVisibility,
+      isViewClear: vis.isViewClear,
+      routeStatus: acc.routeStatus,
+      footprintFitPass: acc.footprintFitPass,
+      legroomPass: acc.legroomPass,
+      turningSpacePass: acc.turningSpacePass,
+      usable,
+      clearAndUsable,
+      failedRequirements,
+      optionalPreferenceNotes: acc.optionalPreferenceNotes,
+      primaryBlockerIds: vis.primaryBlockerIds,
     };
   }
 
@@ -66,6 +143,7 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
 
   const perProfile = {} as Record<ProfileId, ProfileSummaryMetrics>;
   let worstProfileMeanVisibility = 1.0;
+  let hasRepresentedProfile = false;
   let totalVisibleSamples = 0;
   let attendeesWithUnmetRequirements = 0;
   let totalFailedRequirementChecks = 0;
@@ -84,13 +162,17 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
       (a) => !a.clearAndUsable || a.failedRequirements.length > 0,
     ).length;
     const failedCheckCount = list.reduce(
-      (sum, a) => sum + a.failedRequirements.length + (a.isViewClear ? 0 : 1),
+      (sum, a) => sum + a.failedRequirements.length,
       0,
     );
 
-    if (count > 0 && meanVisibility < worstProfileMeanVisibility) {
-      worstProfileMeanVisibility = meanVisibility;
+    if (count > 0) {
+      if (!hasRepresentedProfile || meanVisibility < worstProfileMeanVisibility) {
+        worstProfileMeanVisibility = meanVisibility;
+        hasRepresentedProfile = true;
+      }
     }
+
     totalVisibleSamples += list.reduce((sum, a) => sum + a.visibleSamples, 0);
     attendeesWithUnmetRequirements += unmetRequirementCount;
     totalFailedRequirementChecks += failedCheckCount;
@@ -110,12 +192,14 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
   return {
     contractVersion: CONTRACT_VERSION,
     sceneHash: snapshot.sceneHash,
-    isValidStructure: true,
-    structuralErrors: [],
+    isValidStructure,
+    structuralErrors,
     capacityCount: snapshot.places.length,
     occupiedCount: snapshot.roster.length,
     allModeledRequirementsMet:
-      attendeesWithUnmetRequirements === 0 && totalFailedRequirementChecks === 0,
+      isValidStructure &&
+      attendeesWithUnmetRequirements === 0 &&
+      totalFailedRequirementChecks === 0,
     attendees,
     perProfile,
     comparison: {
@@ -124,63 +208,5 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
       worstProfileMeanVisibility,
       totalVisibleSamples,
     },
-  };
-}
-
-/**
- * Validates and applies a `LayoutPatch` to `currentSnapshot` while enforcing
- * baseline displacement limits against `baselineSnapshot`.
- * Owned by Stream B.
- */
-export function applyAndValidatePatch(
-  _baselineSnapshot: SceneSnapshot,
-  currentSnapshot: SceneSnapshot,
-  patch: LayoutPatch,
-): PatchValidationResult {
-  if (patch.parentSceneHash !== currentSnapshot.sceneHash) {
-    return {
-      valid: false,
-      errors: [
-        {
-          code: 'STALE_SCENE_HASH',
-          message: `Patch parentSceneHash (${patch.parentSceneHash}) does not match current sceneHash (${currentSnapshot.sceneHash}).`,
-        },
-      ],
-    };
-  }
-  return {
-    valid: true,
-    errors: [],
-    snapshot: structuredClone(currentSnapshot),
-  };
-}
-
-/**
- * Compares `baselineEval` and `candidateEval` using PRD §6 non-regression gates
- * and lexicographic comparison priorities.
- * Owned by Stream B.
- */
-export function compareEvaluations(
-  baselineEval: Evaluation,
-  candidateEval: Evaluation,
-): EvaluationComparisonResult {
-  if (!candidateEval.isValidStructure) {
-    return {
-      accepted: false,
-      outcome: 'rejected_structural',
-      reasons: candidateEval.structuralErrors.map((e) => e.message),
-    };
-  }
-  if (candidateEval.sceneHash === baselineEval.sceneHash) {
-    return {
-      accepted: false,
-      outcome: 'rejected_no_improvement',
-      reasons: ['Candidate scene hash is identical to baseline.'],
-    };
-  }
-  return {
-    accepted: false,
-    outcome: 'rejected_no_improvement',
-    reasons: ['Stream B comparison logic pending full implementation.'],
   };
 }

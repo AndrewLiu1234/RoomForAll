@@ -16,6 +16,11 @@ import {
   yawDegToForwardVector,
   yawDegToRightVector,
 } from '../../src/shared/index.js';
+import {
+  captureEvidenceWithFallback,
+  createLocalFixtureRepairPreviewRun,
+  evaluateSceneWithFallback,
+} from '../../src/ui/index.js';
 
 describe('Stream D — Shared Integration Contracts', () => {
   it('enforces PRD coordinate conventions (0° yaw faces -Z, right-handed about +Y)', () => {
@@ -99,5 +104,48 @@ describe('Stream D — Shared Integration Contracts', () => {
     });
     expect('evaluation' in blindPayload).toBe(false);
     expect(blindPayload.editableObjects.length).toBeGreaterThan(0);
+  });
+
+  it('detects shorter viewer sightline occlusion on baseline and resolves it after bounded sign shift', async () => {
+    const baseline = createDevFixtureSnapshot();
+    const baseEval = evaluateSceneWithFallback(baseline);
+
+    // Shorter viewer at R2-1 is occluded by obj_prop_sign_01
+    const samBefore = baseEval.attendees['att_shorter_01'];
+    expect(samBefore).toBeDefined();
+    expect(samBefore!.isViewClear).toBe(false);
+    expect(samBefore!.visibleSamples).toBeLessThan(VISIBILITY_CLEAR_MIN_SAMPLES);
+    expect(samBefore!.primaryBlockerIds).toContain('obj_prop_sign_01');
+
+    // Other 3 profiles have clear views
+    expect(baseEval.attendees['att_adult_01']?.clearAndUsable).toBe(true);
+    expect(baseEval.attendees['att_extra_legroom_01']?.clearAndUsable).toBe(
+      true,
+    );
+    expect(baseEval.attendees['att_wheelchair_01']?.clearAndUsable).toBe(true);
+
+    // After applying the bounded [-0.55, 0, 0] repair on obj_prop_sign_01, all 4 profiles pass
+    const previewRun = createLocalFixtureRepairPreviewRun(baseline);
+    expect(previewRun.outcome).toBe('improved');
+    expect(previewRun.bestEvaluation.allModeledRequirementsMet).toBe(true);
+    expect(
+      previewRun.bestEvaluation.attendees['att_shorter_01']?.visibleSamples,
+    ).toBe(135);
+
+    // Verify evidence capture fallback produces valid video bytes + manifest matching sceneHash
+    const captured = await captureEvidenceWithFallback(baseline, {
+      captureId: 'cap_test_01',
+      runId: 'run_test_01',
+      phase: 'baseline',
+      sceneHash: baseline.sceneHash,
+      snapshot: baseline,
+      keyframes: [],
+      totalDurationSec: 2,
+      deadlineIso: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(captured.videoBlob.size).toBeGreaterThan(0);
+    expect(captured.manifest.captureId).toBe('cap_test_01');
+    expect(captured.manifest.sceneHash).toBe(baseline.sceneHash);
+    expect(captured.manifest.keyframes.length).toBe(1 + baseline.roster.length);
   });
 });
