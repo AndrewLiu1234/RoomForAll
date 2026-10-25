@@ -798,21 +798,21 @@ export function createPreparedVenueReferencePatch(
     diagnosis: [
       {
         attendeeId: 'att_shorter_01',
-        viewId: 'pov_att_shorter_01',
+        viewId: 'view_pov_att_shorter_01',
         timestampSec: 3.5,
         observation:
           'Movable welcome sign at [0.0, 0.0, -2.55] blocks the lower and central portions of the presentation screen for the shorter seated viewer in Row 1 Center.',
       },
       {
         attendeeId: 'att_extra_legroom_01',
-        viewId: 'pov_att_extra_legroom_01',
+        viewId: 'view_pov_att_extra_legroom_01',
         timestampSec: 6.0,
         observation:
           'Stage-front literature table at Z = -2.58m leaves insufficient front legroom for Row 1 East extra-legroom seats (0.55m required).',
       },
       {
         attendeeId: 'att_wheelchair_01',
-        viewId: 'pov_att_wheelchair_01',
+        viewId: 'view_pov_att_wheelchair_01',
         timestampSec: 8.5,
         observation:
           'Movable AV equipment cart at [3.55, 0.0, 4.40] intrudes into East Wheelchair Bay W2 turning pad ([3.00, 4.40], diameter 1.55m).',

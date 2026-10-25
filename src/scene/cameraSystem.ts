@@ -218,7 +218,7 @@ export function buildDefaultCaptureKeyframes(
 
   // Stop 0: Overview
   keyframes.push({
-    viewId: 'view_overview_main',
+    viewId: 'view_overview_room',
     label: 'Venue Overview (Rear-West Elevated)',
     kind: 'overview',
     cameraPosition: overviewPose.position,
@@ -241,7 +241,7 @@ export function buildDefaultCaptureKeyframes(
         : Number(((stopIndex + 1) * slotDuration).toFixed(3));
 
     keyframes.push({
-      viewId: `pov_${attendeeId}`,
+      viewId: `view_pov_${attendeeId}`,
       label: `${member.label} (${member.profileId} @ ${pose.placeId})`,
       kind: 'attendee_pov',
       attendeeId: member.attendeeId,

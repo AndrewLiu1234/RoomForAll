@@ -299,23 +299,30 @@ async function recordBrowserCanvasClip(params: {
   let builtScene: ReturnType<typeof buildVenueThreeScene> | null = null;
 
   try {
-    try {
-      renderer = new THREE.WebGLRenderer({
-        canvas: webglCanvas,
-        antialias: true,
-        preserveDrawingBuffer: true,
-        powerPreference: 'high-performance',
-      });
-      renderer.setSize(widthPx, heightPx, false);
-      renderer.setPixelRatio(1);
+    const canInitWebgl =
+      typeof webglCanvas.addEventListener === 'function' &&
+      Boolean(
+        webglCanvas.getContext('webgl2') || webglCanvas.getContext('webgl'),
+      );
+    if (canInitWebgl) {
+      try {
+        renderer = new THREE.WebGLRenderer({
+          canvas: webglCanvas,
+          antialias: true,
+          preserveDrawingBuffer: true,
+          powerPreference: 'high-performance',
+        });
+        renderer.setSize(widthPx, heightPx, false);
+        renderer.setPixelRatio(1);
 
-      builtScene = buildVenueThreeScene(snapshot, {
-        cleanForEvidenceCapture: true,
-        viewMode: 'overview',
-      });
-    } catch {
-      renderer = null;
-      builtScene = null;
+        builtScene = buildVenueThreeScene(snapshot, {
+          cleanForEvidenceCapture: true,
+          viewMode: 'overview',
+        });
+      } catch {
+        renderer = null;
+        builtScene = null;
+      }
     }
 
     const camera = new THREE.PerspectiveCamera(

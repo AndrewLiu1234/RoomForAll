@@ -629,7 +629,7 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       expect(manifest.byteLength).toBe(videoBlob.size);
       expect(trackStopped).toBe(true);
       expect(slateTexts.length).toBeGreaterThan(0);
-      expect(slateTexts[0]).toContain('view_overview_main');
+      expect(slateTexts[0]).toContain('view_overview_room');
     } finally {
       g.window = prevWindow;
       g.document = prevDocument;

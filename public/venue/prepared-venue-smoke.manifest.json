@@ -11,7 +11,7 @@
   "heightPx": 512,
   "keyframes": [
     {
-      "viewId": "view_overview_main",
+      "viewId": "view_overview_room",
       "label": "Venue Overview (Rear-West Elevated)",
       "kind": "overview",
       "cameraPosition": [
@@ -30,7 +30,7 @@
       "endSec": 2
     },
     {
-      "viewId": "pov_att_shorter_01",
+      "viewId": "view_pov_att_shorter_01",
       "label": "Sam Patel (Shorter Viewer) (shorter_seated @ place_chair_r1_c3)",
       "kind": "attendee_pov",
       "attendeeId": "att_shorter_01",
@@ -51,7 +51,7 @@
       "endSec": 4
     },
     {
-      "viewId": "pov_att_extra_legroom_01",
+      "viewId": "view_pov_att_extra_legroom_01",
       "label": "Morgan Lee (Extra-Legroom) (extra_legroom @ place_chair_r1_c4)",
       "kind": "attendee_pov",
       "attendeeId": "att_extra_legroom_01",
@@ -72,7 +72,7 @@
       "endSec": 6
     },
     {
-      "viewId": "pov_att_wheelchair_01",
+      "viewId": "view_pov_att_wheelchair_01",
       "label": "Jordan Taylor (Wheelchair User) (wheelchair_user @ place_bay_wc_02)",
       "kind": "attendee_pov",
       "attendeeId": "att_wheelchair_01",
@@ -93,7 +93,7 @@
       "endSec": 8
     },
     {
-      "viewId": "pov_att_adult_01",
+      "viewId": "view_pov_att_adult_01",
       "label": "Alex Rivera (Reference Adult) (reference_adult @ place_chair_r1_c1)",
       "kind": "attendee_pov",
       "attendeeId": "att_adult_01",
