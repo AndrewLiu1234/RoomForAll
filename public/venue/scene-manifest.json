@@ -2141,9 +2141,9 @@
       "assignedPlaceId": "place_chair_r1_c1"
     },
     {
-      "attendeeId": "att_shorter_02",
-      "label": "Riley Gomez (Shorter Viewer)",
-      "profileId": "shorter_seated",
+      "attendeeId": "att_adult_02",
+      "label": "Jordan Smith (Reference Adult)",
+      "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r1_c2"
     },
     {
@@ -2171,31 +2171,31 @@
       "assignedPlaceId": "place_chair_r2_c1"
     },
     {
-      "attendeeId": "att_shorter_04",
-      "label": "Charlie Wu (Shorter Viewer)",
-      "profileId": "shorter_seated",
+      "attendeeId": "att_adult_03",
+      "label": "Charlie Wu (Reference Adult)",
+      "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r2_c2"
     },
     {
-      "attendeeId": "att_shorter_03",
-      "label": "Avery Lin (Shorter Viewer)",
-      "profileId": "shorter_seated",
+      "attendeeId": "att_adult_04",
+      "label": "Avery Lin (Reference Adult)",
+      "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r2_c3"
     },
     {
-      "attendeeId": "att_adult_03",
+      "attendeeId": "att_adult_05",
       "label": "Devon Okafor (Reference Adult)",
       "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r2_c4"
     },
     {
-      "attendeeId": "att_adult_04",
+      "attendeeId": "att_adult_06",
       "label": "Jamie Vance (Reference Adult)",
       "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r2_c5"
     },
     {
-      "attendeeId": "att_adult_05",
+      "attendeeId": "att_adult_07",
       "label": "Quinn Shah (Reference Adult)",
       "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r2_c6"
@@ -2207,61 +2207,61 @@
       "assignedPlaceId": "place_chair_r3_c1"
     },
     {
-      "attendeeId": "att_adult_02",
-      "label": "Blair Chen (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_02",
+      "label": "Riley Gomez (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r3_c2"
     },
     {
-      "attendeeId": "att_adult_06",
-      "label": "Hayden Novak (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_03",
+      "label": "Hayden Novak (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r3_c3"
     },
     {
-      "attendeeId": "att_adult_07",
-      "label": "Parker Silva (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_04",
+      "label": "Parker Silva (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r3_c4"
     },
     {
-      "attendeeId": "att_adult_08",
-      "label": "Reese Kaur (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_05",
+      "label": "Reese Kaur (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r3_c5"
     },
     {
-      "attendeeId": "att_adult_09",
-      "label": "Skyler Cho (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_06",
+      "label": "Skyler Cho (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r3_c6"
     },
     {
-      "attendeeId": "att_adult_10",
+      "attendeeId": "att_adult_08",
       "label": "Emerson Bell (Reference Adult)",
       "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r4_c1"
     },
     {
-      "attendeeId": "att_adult_11",
-      "label": "Finley Diaz (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_07",
+      "label": "Dakota Cruz (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r4_c2"
     },
     {
-      "attendeeId": "att_adult_12",
-      "label": "Rowan Park (Reference Adult)",
+      "attendeeId": "att_adult_09",
+      "label": "Cameron Diaz (Reference Adult)",
       "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r4_c3"
     },
     {
-      "attendeeId": "att_adult_13",
-      "label": "Sage Ortiz (Reference Adult)",
-      "profileId": "reference_adult",
+      "attendeeId": "att_shorter_08",
+      "label": "Finley Harper (Shorter Viewer)",
+      "profileId": "shorter_seated",
       "assignedPlaceId": "place_chair_r4_c4"
     },
     {
-      "attendeeId": "att_adult_14",
+      "attendeeId": "att_adult_10",
       "label": "Kendall Hassan (Reference Adult)",
       "profileId": "reference_adult",
       "assignedPlaceId": "place_chair_r4_c5"
@@ -2279,5 +2279,5 @@
       "assignedPlaceId": "place_bay_wc_01"
     }
   ],
-  "sceneHash": "vp_c63388a75b2bceb9"
+  "sceneHash": "vp_ff15d29aa1200205"
 }

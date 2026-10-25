@@ -356,6 +356,14 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
         expect(baseVis).toBeLessThan(VISIBILITY_CLEAR_MIN_SAMPLES);
         // After patch, att_shorter_01 has 135/135 clear view!
         expect(patchedVis).toBe(VISIBILITY_TOTAL_SAMPLES);
+      } else if (
+        member.profileId === 'shorter_seated' &&
+        member.assignedPlaceId.includes('_r3_')
+      ) {
+        // Shorter viewers in Row 3 seated behind tall adults are occluded in flat baseline (< 122/135)
+        expect(baseVis).toBeLessThan(VISIBILITY_CLEAR_MIN_SAMPLES);
+        // After patch with tiered 0.15m risers, their sightlines over front rows improve significantly
+        expect(patchedVis).toBeGreaterThan(baseVis);
       } else {
         // Every other attendee in the 24-place room is clear (>= 122/135) in both baseline and patched, with zero regression!
         expect(baseVis).toBeGreaterThanOrEqual(VISIBILITY_CLEAR_MIN_SAMPLES);
