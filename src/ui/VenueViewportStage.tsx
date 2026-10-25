@@ -59,10 +59,14 @@ export function VenueViewportStage({
 
   const dragStateRef = useRef<{
     dragging: boolean;
+    startX: number;
+    startY: number;
     lastX: number;
     lastY: number;
   }>({
     dragging: false,
+    startX: 0,
+    startY: 0,
     lastX: 0,
     lastY: 0,
   });
@@ -186,6 +190,7 @@ export function VenueViewportStage({
           0.02,
           obj.transform.position[2],
         );
+        ringMesh.userData = { attendeeId: member.attendeeId };
         scene.add(ringMesh);
 
         if (place.turningPadCenter && place.turningPadDiameterM) {
@@ -491,6 +496,8 @@ export function VenueViewportStage({
           if (viewMode !== 'overview') return;
           dragStateRef.current = {
             dragging: true,
+            startX: e.clientX,
+            startY: e.clientY,
             lastX: e.clientX,
             lastY: e.clientY,
           };
@@ -510,8 +517,41 @@ export function VenueViewportStage({
             ),
           }));
         }}
-        onMouseUp={() => {
+        onMouseUp={(e) => {
+          const wasDragging = dragStateRef.current.dragging;
           dragStateRef.current.dragging = false;
+          if (!wasDragging || viewMode !== 'overview' || !onSelectAttendee) {
+            return;
+          }
+          const dist = Math.hypot(
+            e.clientX - dragStateRef.current.startX,
+            e.clientY - dragStateRef.current.startY,
+          );
+          if (dist < 6 && containerRef.current && sceneRef.current && cameraRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              const ndc = new THREE.Vector2(
+                ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                -((e.clientY - rect.top) / rect.height) * 2 + 1,
+              );
+              const raycaster = new THREE.Raycaster();
+              raycaster.setFromCamera(ndc, cameraRef.current);
+              const hits = raycaster.intersectObjects(
+                sceneRef.current.children,
+                true,
+              );
+              for (const hit of hits) {
+                let cur: THREE.Object3D | null = hit.object;
+                while (cur) {
+                  if (typeof cur.userData?.attendeeId === 'string') {
+                    onSelectAttendee(cur.userData.attendeeId);
+                    return;
+                  }
+                  cur = cur.parent;
+                }
+              }
+            }
+          }
         }}
         onMouseLeave={() => {
           dragStateRef.current.dragging = false;

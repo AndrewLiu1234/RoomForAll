@@ -13,6 +13,7 @@
  * and produces a complete, evaluator-ready `SceneSnapshot` plus a human-readable
  * `GlbVenueParseReport` for inspection in `VenueViewport` and the main app.
  */
+import * as THREE from 'three';
 import {
   CONTRACT_VERSION,
   DEFAULT_PROFILE_REQUIREMENTS,
@@ -75,6 +76,7 @@ export interface GlbVenueParseReport {
 interface RawGlbNode {
   name?: string;
   mesh?: number;
+  matrix?: number[];
   translation?: [number, number, number];
   rotation?: [number, number, number, number];
   scale?: [number, number, number];
@@ -233,26 +235,96 @@ export function parseAndLabelGlbVenue(
 
   const labeledNodes: AutoLabeledGlbNode[] = [];
 
+  // Compute world matrix for each node by traversing parent->child hierarchies
+  const localMatrices: THREE.Matrix4[] = rawNodes.map((node) => {
+    const mat = new THREE.Matrix4();
+    if (Array.isArray(node.matrix) && node.matrix.length === 16) {
+      mat.fromArray(node.matrix);
+    } else {
+      const t = node.translation
+        ? new THREE.Vector3(
+            node.translation[0],
+            node.translation[1],
+            node.translation[2],
+          )
+        : new THREE.Vector3(0, 0, 0);
+      const r =
+        node.rotation && node.rotation.length === 4
+          ? new THREE.Quaternion(
+              node.rotation[0],
+              node.rotation[1],
+              node.rotation[2],
+              node.rotation[3],
+            )
+          : new THREE.Quaternion();
+      const s = node.scale
+        ? new THREE.Vector3(node.scale[0], node.scale[1], node.scale[2])
+        : new THREE.Vector3(1, 1, 1);
+      mat.compose(t, r, s);
+    }
+    return mat;
+  });
+
+  const parentIndexMap = new Map<number, number>();
+  rawNodes.forEach((node, pIdx) => {
+    if (Array.isArray(node.children)) {
+      for (const cIdx of node.children) {
+        if (typeof cIdx === 'number') {
+          parentIndexMap.set(cIdx, pIdx);
+        }
+      }
+    }
+  });
+
+  const getWorldMatrix = (idx: number): THREE.Matrix4 => {
+    const chain: number[] = [];
+    const visited = new Set<number>();
+    let cur: number | undefined = idx;
+    while (cur !== undefined && !visited.has(cur) && cur >= 0 && cur < localMatrices.length) {
+      visited.add(cur);
+      chain.unshift(cur);
+      cur = parentIndexMap.get(cur);
+    }
+    const worldMat = new THREE.Matrix4();
+    for (const nIdx of chain) {
+      worldMat.multiply(localMatrices[nIdx]!);
+    }
+    return worldMat;
+  };
+
   for (let idx = 0; idx < rawNodes.length; idx++) {
     const node = rawNodes[idx]!;
+    // Skip pure container parent nodes that have children, no mesh, and no explicit category
+    if (
+      node.mesh === undefined &&
+      Array.isArray(node.children) &&
+      node.children.length > 0 &&
+      !node.extras?.category
+    ) {
+      continue;
+    }
+
     const name =
       typeof node.name === 'string' && node.name.trim().length > 0
         ? node.name.trim()
         : `node_${idx}`;
-    const pos: Vec3 = node.translation
-      ? [
-          Number(node.translation[0].toFixed(4)),
-          Number(node.translation[1].toFixed(4)),
-          Number(node.translation[2].toFixed(4)),
-        ]
-      : [0, 0, 0];
-    const scale: Vec3 = node.scale
-      ? [
-          Math.abs(node.scale[0]),
-          Math.abs(node.scale[1]),
-          Math.abs(node.scale[2]),
-        ]
-      : [1, 1, 1];
+
+    const worldMat = getWorldMatrix(idx);
+    const decompPos = new THREE.Vector3();
+    const decompQuat = new THREE.Quaternion();
+    const decompScale = new THREE.Vector3();
+    worldMat.decompose(decompPos, decompQuat, decompScale);
+
+    const pos: Vec3 = [
+      Number(decompPos.x.toFixed(4)),
+      Number(decompPos.y.toFixed(4)),
+      Number(decompPos.z.toFixed(4)),
+    ];
+    const scale: Vec3 = [
+      Math.abs(decompScale.x),
+      Math.abs(decompScale.y),
+      Math.abs(decompScale.z),
+    ];
 
     let meshSpan: Vec3 = [1, 1, 1];
     if (typeof node.mesh === 'number' && rawMeshes[node.mesh]) {
@@ -280,7 +352,12 @@ export function parseAndLabelGlbVenue(
       Number((meshSpan[1] * scale[1]).toFixed(4)),
       Number((meshSpan[2] * scale[2]).toFixed(4)),
     ];
-    const yawDeg = quaternionToYawDeg(node.rotation);
+    const yawDeg = quaternionToYawDeg([
+      decompQuat.x,
+      decompQuat.y,
+      decompQuat.z,
+      decompQuat.w,
+    ]);
     const role = classifyNodeRole(name, node.extras, pos, sizeWorld);
 
     // If a chair node was exported from a chair-back proxy (`sizeZ <= 0.15`), normalize its

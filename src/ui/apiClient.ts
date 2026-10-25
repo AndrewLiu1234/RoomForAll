@@ -11,7 +11,10 @@ import {
   type SceneSnapshot,
   type UploadEvidenceResponse,
 } from '../shared/index.js';
-import { applyAndValidatePatch } from '../evaluation/index.js';
+import {
+  applyAndValidatePatch,
+  compareEvaluations,
+} from '../evaluation/index.js';
 import {
   PREPARED_VENUE_SCENE_ID,
   createPreparedVenueReferencePatch,
@@ -202,6 +205,120 @@ export function createLocalFixtureRepairPreviewRun(
         remainingIssuesSummary: `All ${placeCount} audience places now satisfy sightline, route, footprint, front-legroom, and wheelchair turning-space requirements (0 failed checks).`,
       },
       providerModel: 'local-reference-preview (no paid model call)',
+      providerRequestIds: [],
+    };
+  }
+
+  const hasDevSign = baselineSnapshot.objects.some(
+    (o) => o.id === 'obj_prop_sign_01',
+  );
+
+  // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues
+  if (!hasDevSign) {
+    const candidateDeltas: Array<[number, 0, number]> = [
+      [-0.55, 0, 0],
+      [0.55, 0, 0],
+      [0, 0, -0.55],
+      [0, 0, 0.55],
+      [-0.55, 0, -0.55],
+      [0.55, 0, 0.55],
+    ];
+    const editableProps = baselineSnapshot.objects
+      .filter((o) => o.editable && o.category === 'movable_prop')
+      .slice(0, 6);
+
+    const ops: LayoutPatch['operations'] = [];
+    let currentSnap = baselineSnapshot;
+    let currentEval = baselineEvaluation;
+
+    for (const prop of editableProps) {
+      for (const delta of candidateDeltas) {
+        const trialPatch: LayoutPatch = {
+          contractVersion: CONTRACT_VERSION,
+          runId: 'preview_custom_glb',
+          parentSceneHash: currentSnap.sceneHash,
+          diagnosis: [],
+          operations: [
+            {
+              targetType: 'object',
+              targetId: prop.id,
+              deltaPositionM: delta,
+              deltaYawDeg: 0,
+              reason: `Relocate ${prop.id} by [${delta.join(', ')}]m to improve sightline or access clearance.`,
+            },
+          ],
+          summary: `Auto-repaired ${prop.id}.`,
+        };
+        const val = applyAndValidatePatch(baselineSnapshot, currentSnap, trialPatch);
+        if (val.valid && val.snapshot) {
+          const nextEval = evaluateSceneWithFallback(val.snapshot);
+          const cmp = compareEvaluations(currentEval, nextEval);
+          if (cmp.accepted) {
+            ops.push(trialPatch.operations[0]!);
+            currentSnap = val.snapshot;
+            currentEval = nextEval;
+            break;
+          }
+        }
+      }
+    }
+
+    const combinedPatch: LayoutPatch = {
+      contractVersion: CONTRACT_VERSION,
+      runId: 'preview_custom_glb',
+      parentSceneHash: baselineSnapshot.sceneHash,
+      diagnosis: [
+        {
+          viewId: 'view_overview_room',
+          timestampSec: 1.0,
+          observation: `Evaluated ${editableProps.length} movable props in uploaded .glb venue.`,
+        },
+      ],
+      operations: ops,
+      summary:
+        ops.length > 0
+          ? `Applied ${ops.length} bounded prop adjustment(s) on uploaded .glb venue.`
+          : 'No movable prop adjustments improved the uploaded .glb venue.',
+    };
+
+    return {
+      contractVersion: CONTRACT_VERSION,
+      runId: 'preview_custom_glb',
+      state: 'finished',
+      outcome: ops.length > 0 ? 'improved' : 'no_improvement',
+      terminalReason: 'Local Uploaded .glb Repair Preview.',
+      createdAtIso: nowIso,
+      updatedAtIso: nowIso,
+      deadlineIso: nowIso,
+      elapsedMs: 0,
+      baselineSnapshot,
+      baselineEvaluation,
+      bestSnapshot: currentSnap,
+      bestEvaluation: currentEval,
+      attempts: [
+        {
+          attemptIndex: 0,
+          patch: combinedPatch,
+          candidateSceneHash: currentSnap.sceneHash,
+          evaluation: currentEval,
+          comparisonOutcome: ops.length > 0 ? 'accepted' : 'rejected_no_improvement',
+          rejectionReasons: [],
+          timestampIso: nowIso,
+        },
+      ],
+      finalInspection: {
+        captureId: 'cap_preview_custom_glb',
+        sceneHash: currentSnap.sceneHash,
+        findings: [
+          {
+            viewId: 'view_overview_room',
+            timestampSec: 1.0,
+            observation: combinedPatch.summary,
+          },
+        ],
+        remainingIssuesSummary: `Unmet requirements: ${currentEval.comparison.attendeesWithUnmetRequirements} (${currentEval.comparison.totalFailedRequirementChecks} failed checks).`,
+      },
+      providerModel: 'local-glb-repair-solver (no paid model call)',
       providerRequestIds: [],
     };
   }

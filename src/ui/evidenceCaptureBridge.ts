@@ -192,10 +192,19 @@ export function populateThreeSceneFromSnapshot(
     hiddenObjectId = place?.objectId;
   }
 
+  const objectToAttendeeId = new Map<string, string>();
+  for (const member of snapshot.roster) {
+    const place = snapshot.places.find((p) => p.id === member.assignedPlaceId);
+    if (place) {
+      objectToAttendeeId.set(place.objectId, member.attendeeId);
+    }
+  }
+
   // Render SceneObjects & Proxies
   for (const obj of snapshot.objects) {
     if (obj.id === hiddenObjectId) continue;
 
+    const assignedAttendeeId = objectToAttendeeId.get(obj.id);
     const group = new THREE.Group();
     group.position.set(
       obj.transform.position[0],
@@ -203,7 +212,11 @@ export function populateThreeSceneFromSnapshot(
       obj.transform.position[2],
     );
     group.rotation.y = obj.transform.yawDeg * DEG_TO_RAD;
-    group.userData = { objectId: obj.id, category: obj.category };
+    group.userData = {
+      objectId: obj.id,
+      category: obj.category,
+      attendeeId: assignedAttendeeId,
+    };
 
     if (obj.category === 'wheelchair_bay_frame') {
       const place = snapshot.places.find((p) => p.objectId === obj.id);
