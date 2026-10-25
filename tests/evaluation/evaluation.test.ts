@@ -395,7 +395,8 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
 
     it('rejects cumulative displacement > 1.50m from frozen baseline across sequential patches', () => {
       const baseline = createDevFixtureSnapshot();
-      // Step 1: move +0.60m in X
+
+      // Step 1: move -0.60m in Z (towards stage, open floor)
       const step1 = applyAndValidatePatch(
         baseline,
         baseline,
@@ -403,7 +404,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
           {
             targetType: 'object',
             targetId: 'obj_prop_sign_01',
-            deltaPositionM: [0.6, 0, 0],
+            deltaPositionM: [0, 0, -0.6],
             deltaYawDeg: 0,
             reason: 'step 1',
           },
@@ -411,7 +412,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       );
       expect(step1.valid).toBe(true);
 
-      // Step 2: move another +0.60m in X (total 1.20m <= 1.50m)
+      // Step 2: move another -0.60m in Z (total 1.20m <= 1.50m)
       const step2 = applyAndValidatePatch(
         baseline,
         step1.snapshot!,
@@ -419,7 +420,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
           {
             targetType: 'object',
             targetId: 'obj_prop_sign_01',
-            deltaPositionM: [0.6, 0, 0],
+            deltaPositionM: [0, 0, -0.6],
             deltaYawDeg: 0,
             reason: 'step 2',
           },
@@ -427,7 +428,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       );
       expect(step2.valid).toBe(true);
 
-      // Step 3: move another +0.40m in X (total 1.60m > 1.50m) -> rejected!
+      // Step 3: move another -0.40m in Z (total 1.60m > 1.50m) -> rejected!
       const step3 = applyAndValidatePatch(
         baseline,
         step2.snapshot!,
@@ -435,7 +436,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
           {
             targetType: 'object',
             targetId: 'obj_prop_sign_01',
-            deltaPositionM: [0.4, 0, 0],
+            deltaPositionM: [0, 0, -0.4],
             deltaYawDeg: 0,
             reason: 'step 3 exceeds 1.50m cumulative displacement',
           },

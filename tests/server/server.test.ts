@@ -20,7 +20,11 @@ import {
   type SceneSnapshot,
   type UploadEvidenceResponse,
 } from '../../src/shared/index.js';
-import { evaluateScene } from '../../src/evaluation/index.js';
+import {
+  applyAndValidatePatch,
+  compareEvaluations,
+  evaluateScene,
+} from '../../src/evaluation/index.js';
 import {
   buildCaptureTourSpec,
   createApp,
@@ -88,191 +92,9 @@ async function uploadMultipartEvidence(
  */
 function createRealisticEvaluatorAdapter(): EvaluatorAdapter {
   return {
-    evaluateScene(snapshot: SceneSnapshot): Evaluation {
-      const baseEval = evaluateScene(snapshot);
-      const sign = snapshot.objects.find((o) => o.id === 'obj_prop_sign_01');
-      const shorter = baseEval.attendees['att_shorter_01'];
-
-      // If sign is still near X = 0.0, shorter viewer is occluded
-      const isSignBlocking =
-        sign !== undefined && Math.abs(sign.transform.position[0]) < 0.4;
-
-      if (shorter && isSignBlocking) {
-        shorter.visibleSamples = 60;
-        shorter.sampledVisibility = 60 / 135;
-        shorter.isViewClear = false;
-        shorter.clearAndUsable = false;
-        shorter.failedRequirements = ['clear_sightline'];
-        shorter.primaryBlockerIds = ['obj_prop_sign_01'];
-
-        baseEval.allModeledRequirementsMet = false;
-        baseEval.perProfile.shorter_seated = {
-          ...baseEval.perProfile.shorter_seated,
-          clearViewCount: 0,
-          clearAndUsableCount: 0,
-          meanVisibility: 60 / 135,
-          unmetRequirementCount: 1,
-          failedCheckCount: 1,
-        };
-        baseEval.comparison = {
-          attendeesWithUnmetRequirements: 1,
-          totalFailedRequirementChecks: 1,
-          worstProfileMeanVisibility: 60 / 135,
-          totalVisibleSamples: 135 * 3 + 60,
-        };
-      }
-
-      return baseEval;
-    },
-
-    applyAndValidatePatch(baselineSnapshot, currentSnapshot, patch) {
-      if (patch.parentSceneHash !== currentSnapshot.sceneHash) {
-        return {
-          valid: false,
-          errors: [
-            {
-              code: 'STALE_SCENE_HASH',
-              message: `Patch parentSceneHash (${patch.parentSceneHash}) does not match current sceneHash (${currentSnapshot.sceneHash}).`,
-            },
-          ],
-        };
-      }
-
-      if (patch.operations.length > 6) {
-        return {
-          valid: false,
-          errors: [
-            {
-              code: 'PATCH_LIMIT_EXCEEDED',
-              message: 'Exceeded maximum of 6 operations.',
-            },
-          ],
-        };
-      }
-
-      const nextSnapshot = structuredClone(currentSnapshot);
-
-      for (const op of patch.operations) {
-        if (op.targetType === 'object') {
-          const obj = nextSnapshot.objects.find((o) => o.id === op.targetId);
-          if (!obj) {
-            return {
-              valid: false,
-              errors: [
-                {
-                  code: 'MISSING_REFERENCE',
-                  message: `Target object ${op.targetId} not found.`,
-                  targetId: op.targetId,
-                },
-              ],
-            };
-          }
-          if (!obj.editable) {
-            return {
-              valid: false,
-              errors: [
-                {
-                  code: 'FIXED_OBJECT_MODIFIED',
-                  message: `Object ${op.targetId} is fixed and cannot be modified.`,
-                  targetId: op.targetId,
-                },
-              ],
-            };
-          }
-
-          obj.transform.position = [
-            Number((obj.transform.position[0] + op.deltaPositionM[0]).toFixed(4)),
-            obj.transform.position[1],
-            Number((obj.transform.position[2] + op.deltaPositionM[2]).toFixed(4)),
-          ];
-          obj.transform.yawDeg = Number(
-            (obj.transform.yawDeg + op.deltaYawDeg).toFixed(4),
-          );
-
-          const baseObj = baselineSnapshot.objects.find(
-            (o) => o.id === op.targetId,
-          );
-          if (baseObj) {
-            const dx =
-              obj.transform.position[0] - baseObj.baselineTransform.position[0];
-            const dz =
-              obj.transform.position[2] - baseObj.baselineTransform.position[2];
-            if (Math.hypot(dx, dz) > 1.5 + 1e-6) {
-              return {
-                valid: false,
-                errors: [
-                  {
-                    code: 'OUT_OF_BOUNDS',
-                    message: `Object ${op.targetId} exceeded 1.50m total displacement from baseline.`,
-                    targetId: op.targetId,
-                  },
-                ],
-              };
-            }
-          }
-        }
-      }
-
-      return {
-        valid: true,
-        errors: [],
-        snapshot: withUpdatedSceneHash(nextSnapshot),
-      };
-    },
-
-    compareEvaluations(baselineEval, candidateEval) {
-      if (!candidateEval.isValidStructure) {
-        return {
-          accepted: false,
-          outcome: 'rejected_structural',
-          reasons: candidateEval.structuralErrors.map((e) => e.message),
-        };
-      }
-      if (candidateEval.sceneHash === baselineEval.sceneHash) {
-        return {
-          accepted: false,
-          outcome: 'rejected_no_improvement',
-          reasons: ['Candidate scene hash is identical to baseline.'],
-        };
-      }
-
-      // Check per-profile non-regression
-      for (const pid of Object.keys(baselineEval.perProfile) as Array<
-        keyof typeof baselineEval.perProfile
-      >) {
-        const baseProf = baselineEval.perProfile[pid];
-        const candProf = candidateEval.perProfile[pid];
-        if (
-          candProf.clearAndUsableCount < baseProf.clearAndUsableCount ||
-          candProf.meanVisibility + 1e-6 < baseProf.meanVisibility
-        ) {
-          return {
-            accepted: false,
-            outcome: 'rejected_regression',
-            reasons: [`Profile ${pid} regressed in visibility or usability.`],
-          };
-        }
-      }
-
-      if (
-        candidateEval.comparison.attendeesWithUnmetRequirements <
-          baselineEval.comparison.attendeesWithUnmetRequirements ||
-        candidateEval.comparison.totalVisibleSamples >
-          baselineEval.comparison.totalVisibleSamples
-      ) {
-        return {
-          accepted: true,
-          outcome: 'accepted',
-          reasons: [],
-        };
-      }
-
-      return {
-        accepted: false,
-        outcome: 'rejected_no_improvement',
-        reasons: ['Candidate evaluation did not improve lexicographic metrics.'],
-      };
-    },
+    evaluateScene,
+    applyAndValidatePatch,
+    compareEvaluations,
   };
 }
 
@@ -668,7 +490,7 @@ describe('Stream C — Argon Controller, Provider Adapter, State Machine & Persi
           summary: 'Insufficient shift.',
         }),
         expectedOutcome: 'rejected_no_improvement',
-        expectedReasonSubstring: 'did not improve',
+        expectedReasonSubstring: 'Candidate evaluation',
       },
     ];
 
