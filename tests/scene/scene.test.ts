@@ -912,10 +912,8 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       expect(clsReport.counts.seats).toBe(50);
       expect(clsReport.counts.wheelchairBays).toBe(0);
       expect(clsReport.snapshot.places).toHaveLength(50);
-      expect(clsReport.snapshot.target.id).toBe(
-        'ProjScreen_16x9_Active_Surface',
-      );
-      expect(clsReport.snapshot.target.center[0]).toBeCloseTo(0.15, 2);
+      expect(clsReport.snapshot.target.id).toBe('Screen_Projection_16x9');
+      expect(clsReport.snapshot.target.center[0]).toBeCloseTo(0.6, 2);
       expect(clsReport.snapshot.target.center[1]).toBeCloseTo(2.94, 2);
       expect(clsReport.snapshot.target.center[2]).toBeCloseTo(-4.38, 2);
       expect(clsReport.snapshot.target.widthM).toBeCloseTo(3.72, 2);
@@ -924,6 +922,16 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       const align = getGlbAlignmentForScene(clsReport.snapshot.sceneId);
       expect(align.rotationYRad).toBe(0);
       expect(align.scale).toBe(1.0);
+
+      // Verify seats are analyzed in 3D across all 5 stepped riser levels (0.16m, 0.34m, 0.52m, 0.70m, 0.88m), not flat at y=0
+      const distinctSeatYLevels = [
+        ...new Set(
+          clsReport.snapshot.objects
+            .filter((o) => o.category === 'movable_chair')
+            .map((o) => Number(o.transform.position[1].toFixed(2))),
+        ),
+      ].sort((a, b) => a - b);
+      expect(distinctSeatYLevels).toEqual([0.16, 0.34, 0.52, 0.7, 0.88]);
 
       const clsEval = evaluateScene(clsReport.snapshot);
       expect(clsEval.isValidStructure).toBe(true);

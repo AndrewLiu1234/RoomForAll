@@ -294,13 +294,21 @@ function classifyNodeRole(
   extras: Record<string, unknown> | undefined,
   pos: Vec3,
   size: Vec3,
-  allowBoxSeatFallback = false,
+  meshContext: {
+    meshName?: string;
+    materialNames?: string[];
+    meshInstanceCount?: number;
+    hasSeatCushionPrimitive?: boolean;
+  } = {},
 ): AutoLabeledNodeRole {
   const lower = name.toLowerCase();
+  const meshLower = (meshContext.meshName ?? '').toLowerCase();
+  const matJoined = (meshContext.materialNames ?? []).join(' ').toLowerCase();
   const extraCat =
     typeof extras?.category === 'string' ? extras.category : undefined;
 
   if (
+    lower.includes('master_auditorium_seat') ||
     lower.includes('floor') ||
     lower.includes('slab') ||
     lower.includes('ceiling') ||
@@ -317,7 +325,9 @@ function classifyNodeRole(
     lower.includes('tie_') ||
     lower.includes('pier') ||
     lower.includes('desk_tier') ||
-    lower.includes('ada_bay')
+    lower.includes('ada_bay') ||
+    lower.includes('stage_lift') ||
+    lower.includes('steppedseatingdecks')
   ) {
     return 'floor_or_shell';
   }
@@ -346,7 +356,8 @@ function classifyNodeRole(
     lower.includes('dualbin') ||
     lower.includes('recycle') ||
     lower.includes('trash') ||
-    lower.includes('student_laptop')
+    lower.includes('student_laptop') ||
+    lower.includes('spotlight')
   ) {
     return 'movable_prop';
   }
@@ -371,20 +382,46 @@ function classifyNodeRole(
   ) {
     return 'stage';
   }
+  if (lower.includes('wheelchair_bay') || lower.includes('accessible_bay')) {
+    return 'floor_or_shell';
+  }
   if (
     extraCat === 'wheelchair_bay_frame' ||
-    lower.includes('bay_wc') ||
-    lower.includes('wheelchair') ||
-    lower.includes('accessible_bay')
+    lower.startsWith('obj_bay_wc') ||
+    lower.startsWith('place_bay_wc')
   ) {
     return 'wheelchair_bay';
   }
+
+  // 3D Semantic & Geometric Chair Detection:
+  // Detects chairs whether explicitly named (`Chair_R1_S01`), named on their shared mesh
+  // (`Ergonomic_Swivel_Task_Chair_MasterMesh`), identified by upholstery/chair materials
+  // (`Mat_Chair_Upholstery`, `Mat_Chair_Frame`), or matching 3D chair proportions + seat cushion geometry.
+  const hasChairMaterialOrMesh =
+    meshLower.includes('chair') ||
+    meshLower.includes('seat') ||
+    matJoined.includes('chair') ||
+    matJoined.includes('upholstery') ||
+    matJoined.includes('seat');
+
+  const is3DChairDimensions =
+    size[0] >= 0.38 &&
+    size[0] <= 0.85 &&
+    size[1] >= 0.62 &&
+    size[1] <= 1.22 &&
+    size[2] >= 0.38 &&
+    size[2] <= 0.85;
+
   if (
     extraCat === 'movable_chair' ||
     lower.includes('chair') ||
     lower.includes('seat') ||
     lower.includes('stool') ||
-    lower.includes('pew')
+    lower.includes('pew') ||
+    (hasChairMaterialOrMesh && is3DChairDimensions) ||
+    (is3DChairDimensions &&
+      ((meshContext.meshInstanceCount ?? 0) >= 6 ||
+        meshContext.hasSeatCushionPrimitive === true))
   ) {
     return 'seat';
   }
@@ -399,17 +436,6 @@ function classifyNodeRole(
 
   if (size[0] > 4.0 && size[2] > 4.0 && size[1] < 0.4 && pos[1] <= 0.2) {
     return 'floor_or_shell';
-  }
-  if (
-    allowBoxSeatFallback &&
-    size[0] >= 0.35 &&
-    size[0] <= 0.85 &&
-    size[1] >= 0.4 &&
-    size[1] <= 1.25 &&
-    size[2] >= 0.05 &&
-    size[2] <= 0.85
-  ) {
-    return 'seat';
   }
 
   return 'floor_or_shell';
@@ -783,6 +809,16 @@ export function parseAndLabelGlbVenue(
   const rawBufferViews = Array.isArray(json.bufferViews)
     ? (json.bufferViews as RawGlbBufferView[])
     : [];
+  const rawMaterials = Array.isArray(json.materials)
+    ? (json.materials as Array<{ name?: string }>)
+    : [];
+
+  const meshInstanceCounts = new Map<number, number>();
+  for (const n of rawNodes) {
+    if (typeof n.mesh === 'number') {
+      meshInstanceCounts.set(n.mesh, (meshInstanceCounts.get(n.mesh) ?? 0) + 1);
+    }
+  }
 
   const labeledNodes: AutoLabeledGlbNode[] = [];
 
@@ -882,10 +918,21 @@ export function parseAndLabelGlbVenue(
 
     let meshSpan: Vec3 = [1, 1, 1];
     let meshCenterLocal: Vec3 = [0, 0, 0];
+    let activeSurfaceSpanLocal: Vec3 | null = null;
+    let activeSurfaceCenterLocal: Vec3 | null = null;
     let totalNodeVerts = 0;
+    let meshName: string | undefined;
+    const materialNames: string[] = [];
+    let hasSeatCushionPrimitive = false;
+    const meshInstanceCount =
+      typeof node.mesh === 'number'
+        ? (meshInstanceCounts.get(node.mesh) ?? 1)
+        : 0;
 
     if (typeof node.mesh === 'number' && rawMeshes[node.mesh]) {
-      const prims = rawMeshes[node.mesh]?.primitives ?? [];
+      const meshObj = rawMeshes[node.mesh]!;
+      meshName = meshObj.name;
+      const prims = meshObj.primitives ?? [];
       let pMinX = Infinity;
       let pMinY = Infinity;
       let pMinZ = Infinity;
@@ -894,6 +941,13 @@ export function parseAndLabelGlbVenue(
       let pMaxZ = -Infinity;
 
       for (const prim of prims) {
+        const matName =
+          typeof prim.material === 'number'
+            ? rawMaterials[prim.material]?.name
+            : undefined;
+        if (matName) {
+          materialNames.push(matName);
+        }
         const posAccIdx = prim?.attributes?.POSITION;
         if (typeof posAccIdx === 'number' && rawAccessors[posAccIdx]) {
           const acc = rawAccessors[posAccIdx]!;
@@ -904,12 +958,46 @@ export function parseAndLabelGlbVenue(
             acc.min.length === 3 &&
             acc.max.length === 3
           ) {
-            pMinX = Math.min(pMinX, acc.min[0]!);
-            pMinY = Math.min(pMinY, acc.min[1]!);
-            pMinZ = Math.min(pMinZ, acc.min[2]!);
-            pMaxX = Math.max(pMaxX, acc.max[0]!);
-            pMaxY = Math.max(pMaxY, acc.max[1]!);
-            pMaxZ = Math.max(pMaxZ, acc.max[2]!);
+            const minX0 = acc.min[0]!;
+            const minY0 = acc.min[1]!;
+            const minZ0 = acc.min[2]!;
+            const maxX0 = acc.max[0]!;
+            const maxY0 = acc.max[1]!;
+            const maxZ0 = acc.max[2]!;
+            pMinX = Math.min(pMinX, minX0);
+            pMinY = Math.min(pMinY, minY0);
+            pMinZ = Math.min(pMinZ, minZ0);
+            pMaxX = Math.max(pMaxX, maxX0);
+            pMaxY = Math.max(pMaxY, maxY0);
+            pMaxZ = Math.max(pMaxZ, maxZ0);
+
+            if (
+              minY0 >= 0.32 &&
+              minY0 <= 0.52 &&
+              maxY0 >= 0.72 &&
+              maxY0 <= 1.05 &&
+              maxX0 - minX0 >= 0.35 &&
+              maxX0 - minX0 <= 0.72
+            ) {
+              hasSeatCushionPrimitive = true;
+            }
+
+            const matLower = (matName ?? '').toLowerCase();
+            if (
+              matLower.includes('projection_screen') ||
+              matLower.includes('whiteboard_porcelain')
+            ) {
+              activeSurfaceSpanLocal = [
+                Math.max(0.02, maxX0 - minX0),
+                Math.max(0.02, maxY0 - minY0),
+                Math.max(0.02, maxZ0 - minZ0),
+              ];
+              activeSurfaceCenterLocal = [
+                (minX0 + maxX0) * 0.5,
+                (minY0 + maxY0) * 0.5,
+                (minZ0 + maxZ0) * 0.5,
+              ];
+            }
           }
         }
       }
@@ -928,15 +1016,23 @@ export function parseAndLabelGlbVenue(
       }
     }
 
+    const effectiveSpan = activeSurfaceSpanLocal ?? meshSpan;
+    const effectiveCenterLocal = activeSurfaceCenterLocal ?? meshCenterLocal;
+
     const sizeWorld: Vec3 = [
-      Number((meshSpan[0] * scale[0]).toFixed(4)),
-      Number((meshSpan[1] * scale[1]).toFixed(4)),
-      Number((meshSpan[2] * scale[2]).toFixed(4)),
+      Number((effectiveSpan[0] * scale[0]).toFixed(4)),
+      Number((effectiveSpan[1] * scale[1]).toFixed(4)),
+      Number((effectiveSpan[2] * scale[2]).toFixed(4)),
     ];
+    const centerWorldVec = new THREE.Vector3(
+      effectiveCenterLocal[0],
+      effectiveCenterLocal[1],
+      effectiveCenterLocal[2],
+    ).applyMatrix4(worldMat);
     const centerWorld: Vec3 = [
-      Number((pos[0] + meshCenterLocal[0] * scale[0]).toFixed(4)),
-      Number((pos[1] + meshCenterLocal[1] * scale[1]).toFixed(4)),
-      Number((pos[2] + meshCenterLocal[2] * scale[2]).toFixed(4)),
+      Number(centerWorldVec.x.toFixed(4)),
+      Number(centerWorldVec.y.toFixed(4)),
+      Number(centerWorldVec.z.toFixed(4)),
     ];
     const yawDeg = quaternionToYawDeg([
       decompQuat.x,
@@ -944,16 +1040,23 @@ export function parseAndLabelGlbVenue(
       decompQuat.z,
       decompQuat.w,
     ]);
-    const role = classifyNodeRole(name, node.extras, pos, sizeWorld);
+    const role = classifyNodeRole(name, node.extras, pos, sizeWorld, {
+      meshName,
+      materialNames,
+      meshInstanceCount,
+      hasSeatCushionPrimitive,
+    });
 
     const normalizedPos: Vec3 =
       role === 'seat' && sizeWorld[2] <= 0.15
         ? [pos[0], 0.0, Number((pos[2] - 0.22).toFixed(4))]
-        : pos[0] === 0 &&
-            pos[2] === 0 &&
-            (centerWorld[0] !== 0 || centerWorld[2] !== 0)
+        : role === 'presentation_screen' && activeSurfaceCenterLocal !== null
           ? centerWorld
-          : pos;
+          : pos[0] === 0 &&
+              pos[2] === 0 &&
+              (centerWorld[0] !== 0 || centerWorld[2] !== 0)
+            ? centerWorld
+            : pos;
 
     labeledNodes.push({
       nodeIndex: idx,
@@ -1261,18 +1364,18 @@ export function parseAndLabelGlbVenue(
   let maxZ = 7.0;
 
   for (const n of labeledNodes) {
-    minX = Math.min(minX, n.positionWorld[0] - n.sizeWorld[0] / 2 - 0.4);
-    maxX = Math.max(maxX, n.positionWorld[0] + n.sizeWorld[0] / 2 + 0.4);
-    maxY = Math.max(maxY, n.positionWorld[1] + n.sizeWorld[1] / 2 + 0.2);
-    minZ = Math.min(minZ, n.positionWorld[2] - n.sizeWorld[2] / 2 - 0.4);
-    maxZ = Math.max(maxZ, n.positionWorld[2] + n.sizeWorld[2] / 2 + 0.4);
+    minX = Math.min(minX, n.positionWorld[0] - n.sizeWorld[0] - 0.8);
+    maxX = Math.max(maxX, n.positionWorld[0] + n.sizeWorld[0] + 0.8);
+    maxY = Math.max(maxY, n.positionWorld[1] + n.sizeWorld[1] + 0.8);
+    minZ = Math.min(minZ, n.positionWorld[2] - n.sizeWorld[2] - 0.8);
+    maxZ = Math.max(maxZ, n.positionWorld[2] + n.sizeWorld[2] + 0.8);
   }
 
   const roomBounds = {
-    min: [Number(minX.toFixed(2)), 0.0, Number(minZ.toFixed(2))] as Vec3,
+    min: [Number(minX.toFixed(2)), -0.5, Number(minZ.toFixed(2))] as Vec3,
     max: [
       Number(maxX.toFixed(2)),
-      Number(maxY.toFixed(2)),
+      Number((maxY + 1.5).toFixed(2)),
       Number(maxZ.toFixed(2)),
     ] as Vec3,
   };
@@ -1407,8 +1510,8 @@ export function parseAndLabelGlbVenue(
 
     const pMinX = prop.positionWorld[0] - prop.sizeWorld[0] * 0.5;
     const pMaxX = prop.positionWorld[0] + prop.sizeWorld[0] * 0.5;
-    const pMinY = Math.max(0, prop.positionWorld[1] - prop.sizeWorld[1] * 0.5);
-    const pMaxY = prop.positionWorld[1] + prop.sizeWorld[1] * 0.5;
+    const pMinY = Math.max(0, prop.positionWorld[1]);
+    const pMaxY = Math.max(0.3, prop.positionWorld[1] + prop.sizeWorld[1]);
     const pMinZ = prop.positionWorld[2] - prop.sizeWorld[2] * 0.5;
     const pMaxZ = prop.positionWorld[2] + prop.sizeWorld[2] * 0.5;
 
@@ -1456,10 +1559,10 @@ export function parseAndLabelGlbVenue(
       transform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
       baselineTransform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
       allowedBounds: {
-        minX: Number((roomBounds.min[0] + 0.3).toFixed(2)),
-        maxX: Number((roomBounds.max[0] - 0.3).toFixed(2)),
-        minZ: Number((roomBounds.min[2] + 0.4).toFixed(2)),
-        maxZ: Number((roomBounds.max[2] - 0.3).toFixed(2)),
+        minX: Number((roomBounds.min[0] + 0.1).toFixed(2)),
+        maxX: Number((roomBounds.max[0] - 0.1).toFixed(2)),
+        minZ: Number((roomBounds.min[2] + 0.1).toFixed(2)),
+        maxZ: Number((roomBounds.max[2] - 0.1).toFixed(2)),
       },
       proxies: [
         {
@@ -1583,8 +1686,8 @@ export function parseAndLabelGlbVenue(
         ? objId.replace('obj_chair_', 'place_chair_')
         : `place_chair_r${rowNum}_c${colNum}`;
       const seatX = seat.positionWorld[0];
+      const seatY = Math.max(0, Number(seat.positionWorld[1].toFixed(3)));
       const seatZ = seat.positionWorld[2];
-      const tierY = Math.max(0, Number(seat.positionWorld[1].toFixed(3)));
       const anchorZ = isLastRow ? rearCorridorZ : aisleZ;
 
       let minNeighborDist = 1.0;
@@ -1612,9 +1715,9 @@ export function parseAndLabelGlbVenue(
         category: 'movable_chair',
         editable: true,
         groupId,
-        transform: { position: [seatX, 0.0, seatZ], yawDeg: seat.yawDeg },
+        transform: { position: [seatX, seatY, seatZ], yawDeg: seat.yawDeg },
         baselineTransform: {
-          position: [seatX, 0.0, seatZ],
+          position: [seatX, seatY, seatZ],
           yawDeg: seat.yawDeg,
         },
         allowedBounds: dynamicAllowedBounds,
@@ -1622,7 +1725,7 @@ export function parseAndLabelGlbVenue(
           {
             id: `proxy_${objId}_back`,
             kind: 'box',
-            localPosition: [0.0, Number((tierY + 0.42).toFixed(3)), 0.22],
+            localPosition: [0.0, 0.42, 0.22],
             localYawDeg: 0,
             size: [
               Math.max(0.4, Math.min(adaptiveWidthM, seat.sizeWorld[0])),
@@ -1640,7 +1743,7 @@ export function parseAndLabelGlbVenue(
         label: `Seat R${rowNum}-${colNum}`,
         kind: 'chair',
         objectId: objId,
-        seatHeightM: Number((0.45 + tierY).toFixed(3)),
+        seatHeightM: 0.45,
         widthM: adaptiveWidthM,
         depthM: adaptiveDepthM,
         isAisle:
@@ -1658,12 +1761,18 @@ export function parseAndLabelGlbVenue(
         rowSeats.length
       ).toFixed(4),
     );
+    const avgY = Number(
+      (
+        rowSeats.reduce((acc, s) => acc + Math.max(0, s.positionWorld[1]), 0) /
+        rowSeats.length
+      ).toFixed(4),
+    );
     chairGroups.push({
       id: groupId,
       label: `Auto-Detected Row ${rowNum} Group`,
       memberObjectIds: memberIds,
-      transform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
-      baselineTransform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
+      transform: { position: [avgX, avgY, rowZ], yawDeg: 0 },
+      baselineTransform: { position: [avgX, avgY, rowZ], yawDeg: 0 },
       allowedBounds: dynamicAllowedBounds,
     });
   });

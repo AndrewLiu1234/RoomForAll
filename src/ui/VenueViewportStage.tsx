@@ -386,13 +386,21 @@ export function VenueViewportStage({
     );
 
     if (viewMode !== 'attendee_pov') {
-      // Render interactive seat/bay markers for ALL parsed places (occupied AND empty!)
+      // Shared geometries for 3D Seat Indicators across all parsed chairs on all 3D levels
+      const seatBeaconGeo = new THREE.SphereGeometry(0.095, 16, 16);
+      const seatStemGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.24, 8);
+
+      // Render interactive 3D Seat Indicators for ALL parsed places (occupied AND empty!) at their true 3D [x, y, z] elevation
       for (const place of snapshot.places) {
         const obj = snapshot.objects.find((o) => o.id === place.objectId);
         if (!obj) continue;
 
-        const tierY =
-          place.kind === 'chair' ? Math.max(0, place.seatHeightM - 0.45) : 0;
+        const baseX = obj.transform.position[0];
+        const baseY = obj.transform.position[1];
+        const baseZ = obj.transform.position[2];
+        const seatPanY =
+          baseY + (place.kind === 'chair' ? place.seatHeightM : 0.04);
+
         const occupant = occupantByPlaceId.get(place.id);
         const isSelectedOccupant =
           occupant && occupant.attendeeId === selectedAttendeeId;
@@ -402,7 +410,7 @@ export function VenueViewportStage({
           ? evaluation.attendees[occupant.attendeeId]
           : undefined;
 
-        const ringColor = isSelectedOccupant || isSelectedEmpty
+        const indicatorColor = isSelectedOccupant || isSelectedEmpty
           ? 0x38bdf8
           : occupant
             ? !attEval
@@ -410,46 +418,66 @@ export function VenueViewportStage({
               : attEval.clearAndUsable
                 ? 0x10b981
                 : 0xef4444
-            : 0x64748b;
+            : 0x0ea5e9;
 
+        // 1. 3D Seat Cushion Ring directly on the chair's seat pan (baseY + seatHeightM + 0.02)
         const ringGeo = new THREE.RingGeometry(
-          isSelectedOccupant || isSelectedEmpty ? 0.34 : 0.27,
-          isSelectedOccupant || isSelectedEmpty ? 0.44 : 0.34,
+          isSelectedOccupant || isSelectedEmpty ? 0.22 : 0.17,
+          isSelectedOccupant || isSelectedEmpty ? 0.30 : 0.24,
           28,
         );
         const ringMat = new THREE.MeshBasicMaterial({
-          color: ringColor,
+          color: indicatorColor,
           side: THREE.DoubleSide,
           transparent: !occupant && !isSelectedEmpty,
-          opacity: !occupant && !isSelectedEmpty ? 0.55 : 0.95,
+          opacity: !occupant && !isSelectedEmpty ? 0.82 : 0.98,
         });
         const ringMesh = new THREE.Mesh(ringGeo, ringMat);
         ringMesh.rotation.x = -Math.PI / 2;
-        ringMesh.position.set(
-          obj.transform.position[0],
-          obj.transform.position[1] + tierY + 0.03,
-          obj.transform.position[2],
-        );
+        ringMesh.position.set(baseX, seatPanY + 0.02, baseZ);
         ringMesh.userData = {
           placeId: place.id,
           attendeeId: occupant?.attendeeId,
         };
         scene.add(ringMesh);
 
-        // Add an invisible/subtle pickable hit disc over every seat so clicking empty seats in 3D is effortless
-        const hitGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.5, 16);
+        // 2. 3D Floating Seat Beacon Orb + Stem right above the chair seat cushion so every seat across all 3D tiers is visibly marked!
+        if (!occupant || isSelectedOccupant) {
+          const beaconMat = new THREE.MeshBasicMaterial({
+            color: isSelectedEmpty ? 0xfacc15 : indicatorColor,
+          });
+          const beaconMesh = new THREE.Mesh(seatBeaconGeo, beaconMat);
+          beaconMesh.position.set(baseX, seatPanY + 0.26, baseZ);
+          beaconMesh.userData = {
+            placeId: place.id,
+            attendeeId: occupant?.attendeeId,
+          };
+          scene.add(beaconMesh);
+
+          const stemMat = new THREE.MeshBasicMaterial({
+            color: indicatorColor,
+            transparent: true,
+            opacity: 0.7,
+          });
+          const stemMesh = new THREE.Mesh(seatStemGeo, stemMat);
+          stemMesh.position.set(baseX, seatPanY + 0.14, baseZ);
+          stemMesh.userData = {
+            placeId: place.id,
+            attendeeId: occupant?.attendeeId,
+          };
+          scene.add(stemMesh);
+        }
+
+        // 3. Pickable 3D hit cylinder centered on the chair's 3D seat cushion & backrest
+        const hitGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.65, 16);
         const hitMat = new THREE.MeshBasicMaterial({
           color: 0x38bdf8,
           transparent: true,
-          opacity: isSelectedEmpty ? 0.24 : 0.0,
+          opacity: isSelectedEmpty ? 0.26 : 0.0,
           depthWrite: false,
         });
         const hitMesh = new THREE.Mesh(hitGeo, hitMat);
-        hitMesh.position.set(
-          obj.transform.position[0],
-          obj.transform.position[1] + tierY + 0.25,
-          obj.transform.position[2],
-        );
+        hitMesh.position.set(baseX, seatPanY + 0.22, baseZ);
         hitMesh.userData = {
           placeId: place.id,
           attendeeId: occupant?.attendeeId,
