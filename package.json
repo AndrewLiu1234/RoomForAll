@@ -1,0 +1,40 @@
+{
+  "name": "venuepilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VenuePilot — Existing Venue Accessibility and Viewing Review (Argon MVP)",
+  "scripts": {
+    "dev:client": "vite",
+    "dev:server": "tsx watch src/server/main.ts",
+    "prepare:venue": "tsx scripts/prepare-venue.ts",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:A": "vitest run tests/scene",
+    "test:B": "vitest run tests/evaluation",
+    "test:C": "vitest run tests/server",
+    "test:D": "vitest run tests/integration"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.13.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.174.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.7"
+  }
+}
