@@ -466,8 +466,10 @@ function buildAgentEgressWaypoints(
       remainingDistToExit: number;
     } | null = null;
 
-    // Step 0.32m out of the chair into the clear row cross-aisle so the person never walks through neighboring chairs
-    const rowStepZ = Number((seatPos[1] - 0.32).toFixed(3));
+    // Step 0.34m forward out of the chair (toward the stage/screen) into the clear row foot-aisle
+    // so the person never steps backward through their chair backrest or into the concrete tier riser!
+    const forwardSign = snapshot.target.center[2] > seatPos[1] ? 1 : -1;
+    const rowStepZ = Number((seatPos[1] + forwardSign * 0.34).toFixed(3));
 
     for (const exit of sortedByDist) {
       if (exit.isBlocked) continue;
@@ -483,36 +485,32 @@ function buildAgentEgressWaypoints(
           ? exit.position[0] + 0.65
           : exit.position[0] - 0.65;
 
-      const candidateChains: Vec2[][] = [
-        ...(Math.abs(exit.position[1] - seatPos[1]) < 0.65
+      const candidateChains: Vec2[][] =
+        Math.abs(exit.position[1] - seatPos[1]) < 0.65
           ? [
+              [
+                [seatPos[0], rowStepZ] as Vec2,
+                [exit.position[0], exit.position[1]] as Vec2,
+              ],
               [
                 [seatPos[0], exit.position[1]] as Vec2,
                 [exit.position[0], exit.position[1]] as Vec2,
               ],
               [[exit.position[0], exit.position[1]] as Vec2],
             ]
-          : []),
-        [
-          [seatPos[0], rowStepZ],
-          [Number(sideAisleX.toFixed(3)), rowStepZ],
-          [exit.position[0], exit.position[1]],
-        ],
-        [
-          [Number(sideAisleX.toFixed(3)), seatPos[1]],
-          [exit.position[0], exit.position[1]],
-        ],
-        [
-          [Number(inboardAisleX.toFixed(3)), seatPos[1]],
-          [Number(inboardAisleX.toFixed(3)), exit.position[1]],
-          [exit.position[0], exit.position[1]],
-        ],
-        [
-          [seatPos[0], exit.position[1]],
-          [exit.position[0], exit.position[1]],
-        ],
-        [[exit.position[0], exit.position[1]]],
-      ];
+          : [
+              [
+                [seatPos[0], rowStepZ],
+                [Number(sideAisleX.toFixed(3)), rowStepZ],
+                [exit.position[0], exit.position[1]],
+              ],
+              [
+                [seatPos[0], rowStepZ],
+                [Number(inboardAisleX.toFixed(3)), rowStepZ],
+                [Number(inboardAisleX.toFixed(3)), exit.position[1]],
+                [exit.position[0], exit.position[1]],
+              ],
+            ];
 
       for (const chain of candidateChains) {
         const check = checkWaypointChainWallFree(
@@ -753,7 +751,10 @@ export function synthesizeReachableExitsForSnapshot(
     });
   }
 
-  if (occupiedSeats.length === 0) {
+  if (
+    occupiedSeats.length === 0 ||
+    occupiedSeats.every((s) => !s.baselineTrapped && s.baselinePathLengthM <= 8.5)
+  ) {
     return [];
   }
 
@@ -776,7 +777,8 @@ export function synthesizeReachableExitsForSnapshot(
 
   const offsetsX = [-2.2, -1.5, -0.9, 0.9, 1.5, 2.2];
   for (const info of occupiedSeats) {
-    const aisleZ = Number((info.seatPos[1] - 0.32).toFixed(2));
+    const forwardSign = snapshot.target.center[2] > info.seatPos[1] ? 1 : -1;
+    const aisleZ = Number((info.seatPos[1] + forwardSign * 0.34).toFixed(2));
     for (const dx of offsetsX) {
       const dSign: -1 | 1 = dx < 0 ? -1 : 1;
       const targetX =
@@ -801,15 +803,20 @@ export function synthesizeReachableExitsForSnapshot(
     }
   }
 
-  // Also add midpoints between pairs of occupied seats on the same tier so a single moved exit can serve multiple people
+  // Also add midpoints between pairs of occupied seats on the same row & tier so a single moved exit can serve multiple people
   for (let i = 0; i < occupiedSeats.length; i++) {
     for (let j = i + 1; j < occupiedSeats.length; j++) {
       const a = occupiedSeats[i]!;
       const b = occupiedSeats[j]!;
-      if (Math.abs(a.seatY - b.seatY) <= 0.9) {
+      if (
+        Math.abs(a.seatY - b.seatY) <= 0.85 &&
+        Math.abs(a.seatPos[1] - b.seatPos[1]) < 0.6
+      ) {
+        const forwardSign =
+          snapshot.target.center[2] > a.seatPos[1] ? 1 : -1;
         const midX = Number(((a.seatPos[0] + b.seatPos[0]) * 0.5).toFixed(2));
         const midZ = Number(
-          ((a.seatPos[1] + b.seatPos[1]) * 0.5 - 0.32).toFixed(2),
+          ((a.seatPos[1] + b.seatPos[1]) * 0.5 + forwardSign * 0.34).toFixed(2),
         );
         const avgY = Number(((a.seatY + b.seatY) * 0.5).toFixed(2));
         candidates.push({
@@ -873,7 +880,7 @@ export function synthesizeReachableExitsForSnapshot(
             seat.seatPos,
             check.waypoints,
           );
-          if (pLen <= 9.5) {
+          if (pLen <= 3.2) {
             covered.push(sIdx);
             if (pLen > maxPath) maxPath = pLen;
             sumPath += pLen;
@@ -1144,11 +1151,34 @@ export function simulateEvacuation(
     if (step % 2 === 0 || step === totalSteps || allSettled) {
       const frameAgents: Record<string, EvacuationAgentFrameState> = {};
       for (const ag of agents) {
+        const targetPortal = resolvedExits.find(
+          (e) => e.id === ag.targetExitId,
+        );
+        const exitY = targetPortal?.elevationM ?? ag.seatY;
+        const totalDist = Math.max(
+          0.1,
+          Math.hypot(
+            (targetPortal?.position[0] ?? ag.seatPos[0]) - ag.seatPos[0],
+            (targetPortal?.position[1] ?? ag.seatPos[1]) - ag.seatPos[1],
+          ),
+        );
+        const remDist = Math.hypot(
+          (targetPortal?.position[0] ?? ag.position[0]) - ag.position[0],
+          (targetPortal?.position[1] ?? ag.position[1]) - ag.position[1],
+        );
+        const progress = ag.trappedByWall
+          ? 0
+          : Math.max(0, Math.min(1, 1 - remDist / totalDist));
+        const currentElevationM = Number(
+          (ag.seatY + (exitY - ag.seatY) * progress).toFixed(3),
+        );
+
         frameAgents[ag.attendeeId] = {
           position: [
             Number(ag.position[0].toFixed(3)),
             Number(ag.position[1].toFixed(3)),
           ],
+          elevationM: currentElevationM,
           yawDeg: Number(ag.yawDeg.toFixed(1)),
           speedMps: Number(
             Math.hypot(ag.velocity[0], ag.velocity[1]).toFixed(2),

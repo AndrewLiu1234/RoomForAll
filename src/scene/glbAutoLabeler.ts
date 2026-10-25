@@ -1723,8 +1723,8 @@ export function parseAndLabelGlbVenue(
       {
         id: 'wall_parapet_grand_tier_front',
         label: 'Grand Tier Front Parapet Wall',
-        pos: [0.0, 0.0, -2.8],
-        size: [31.5, 6.5, 0.4],
+        pos: [0.0, 0.0, -4.2],
+        size: [18.0, 6.5, 0.35],
       },
       {
         id: 'wall_plinth_grand_tier_rear',
@@ -1733,16 +1733,22 @@ export function parseAndLabelGlbVenue(
         size: [42.0, 10.0, 0.5],
       },
       {
+        id: 'wall_stage_apron_riser',
+        label: 'Stage Apron Walnut Riser Wall',
+        pos: [0.0, 0.0, 16.5],
+        size: [30.0, 3.0, 0.6],
+      },
+      {
         id: 'wall_perimeter_west_enclosure',
         label: 'West Perimeter Enclosure Wall',
-        pos: [-20.95, 0.0, -5.0],
-        size: [0.4, 12.0, 42.0],
+        pos: [-21.12, 0.0, -5.0],
+        size: [0.12, 12.0, 42.0],
       },
       {
         id: 'wall_perimeter_east_enclosure',
         label: 'East Perimeter Enclosure Wall',
-        pos: [20.95, 0.0, -5.0],
-        size: [0.4, 12.0, 42.0],
+        pos: [21.12, 0.0, -5.0],
+        size: [0.12, 12.0, 42.0],
       },
     ];
 
@@ -1922,7 +1928,7 @@ export function parseAndLabelGlbVenue(
   const unnumberedSeats: AutoLabeledGlbNode[] = [];
   for (const seat of seatNodes) {
     const toriumMatch = seat.name.match(
-      /^(Seat_(?:Orch_R\d+|GT\d+|LowerGallery_[A-Za-z]+_R\d+|UpperGallery_[A-Za-z]+_R\d+))/i,
+      /^(Seat_(?:Orch_[A-Za-z0-9]+|GT\d+|LowerGallery_[A-Za-z]+_R\d+|UpperGallery_[A-Za-z]+_R\d+))/i,
     );
     if (toriumMatch) {
       const key = toriumMatch[1]!;

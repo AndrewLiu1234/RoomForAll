@@ -402,6 +402,34 @@ export function createLocalFixtureRepairPreviewRun(
       }
     }
 
+    // If any chair was shifted in Step 2, re-optimize exit positions for the shifted chair coordinates
+    if (ops.length > 0) {
+      const postChairExits = synthesizeReachableExitsForSnapshot({
+        ...currentSnap,
+        exits: baselineSnapshot.exits,
+      });
+      if (postChairExits.length > 0) {
+        const mergedExits = baselineSnapshot.exits
+          ? [...baselineSnapshot.exits]
+          : [];
+        const idxById = new Map(mergedExits.map((e, i) => [e.id, i]));
+        for (const upExit of postChairExits) {
+          const existingIdx = idxById.get(upExit.id);
+          if (existingIdx !== undefined) {
+            mergedExits[existingIdx] = structuredClone(upExit);
+          } else {
+            idxById.set(upExit.id, mergedExits.length);
+            mergedExits.push(structuredClone(upExit));
+          }
+        }
+        addedExits.splice(0, addedExits.length, ...postChairExits);
+        currentSnap = withUpdatedSceneHash({
+          ...currentSnap,
+          exits: mergedExits,
+        });
+      }
+    }
+
     // 3. Shift & widen walkways (`updatedRoutes`) to align with shifted chairs and provide 1.15m clear aisle width
     const updatedRoutes = currentSnap.routes.map((route) => {
       const placesOnRoute = currentSnap.places.filter(

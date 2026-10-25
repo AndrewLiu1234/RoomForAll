@@ -179,6 +179,8 @@ export interface VenueExitPortal {
 
 export interface EvacuationAgentFrameState {
   position: Vec2;
+  /** True 3D floor/tier surface elevation Y in metres at this frame */
+  elevationM?: number;
   yawDeg: number;
   speedMps: number;
   state: 'seated' | 'extricating' | 'walking' | 'queuing' | 'exited';
