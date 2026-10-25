@@ -420,13 +420,44 @@ export function applyAndValidatePatch(
     return { valid: false, errors };
   }
 
+  if (Array.isArray(patch.updatedRoutes) && patch.updatedRoutes.length > 0) {
+    // Synchronize place.routeAnchorPoint whenever a chair object or chair group is shifted alongside updatedRoutes
+    const nextObjById = new Map(nextSnapshot.objects.map((o) => [o.id, o]));
+    const baseObjById = new Map(currentSnapshot.objects.map((o) => [o.id, o]));
+    for (const place of nextSnapshot.places) {
+      const nextObj = nextObjById.get(place.objectId);
+      const prevObj = baseObjById.get(place.objectId);
+      if (nextObj && prevObj) {
+        const dOx =
+          nextObj.transform.position[0] - prevObj.transform.position[0];
+        const dOz =
+          nextObj.transform.position[2] - prevObj.transform.position[2];
+        if (Math.abs(dOx) > 1e-5 || Math.abs(dOz) > 1e-5) {
+          place.routeAnchorPoint = [
+            snap4(place.routeAnchorPoint[0] + dOx),
+            snap4(place.routeAnchorPoint[1] + dOz),
+          ];
+        }
+      }
+    }
+
+    const routeById = new Map(nextSnapshot.routes.map((r) => [r.id, r]));
+    for (const updRoute of patch.updatedRoutes) {
+      routeById.set(updRoute.id, structuredClone(updRoute));
+    }
+    nextSnapshot.routes = Array.from(routeById.values());
+  }
+
   if (Array.isArray(patch.addedExits) && patch.addedExits.length > 0) {
     const existingExits = nextSnapshot.exits ? [...nextSnapshot.exits] : [];
-    const existingIds = new Set(existingExits.map((e) => e.id));
+    const indexById = new Map(existingExits.map((e, i) => [e.id, i]));
     for (const newExit of patch.addedExits) {
-      if (!existingIds.has(newExit.id)) {
+      const existingIdx = indexById.get(newExit.id);
+      if (existingIdx !== undefined) {
+        existingExits[existingIdx] = structuredClone(newExit);
+      } else {
+        indexById.set(newExit.id, existingExits.length);
         existingExits.push(structuredClone(newExit));
-        existingIds.add(newExit.id);
       }
     }
     nextSnapshot.exits = existingExits;

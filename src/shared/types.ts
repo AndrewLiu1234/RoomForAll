@@ -282,7 +282,9 @@ export interface LayoutPatch {
   parentSceneHash: string;
   diagnosis: EvidenceFinding[];
   operations: PatchOperation[];
-  /** Optional new reachable exit portals synthesized by the repairer when existing exits are unreachable without phasing through walls */
+  /** Optional shifted or widened walkway corridors synthesized by the repairer */
+  updatedRoutes?: RouteCorridor[];
+  /** Optional new or shifted reachable exit portals synthesized by the repairer */
   addedExits?: VenueExitPortal[];
   summary: string;
 }

@@ -1769,9 +1769,54 @@ export function parseAndLabelGlbVenue(
     }
   }
 
-  // Group multi-part obstacles (e.g. `Obs_Rolling_Whiteboard_Easel_*`, `Obs_Mobile_AV_Cart_*`)
-  // into single composite movable_prop SceneObjects when not in standalone mode, or keep only
-  // non-overlapping top-level props so multi-part CAD sub-nodes never collide with each other.
+  const hasClassroomDesks = rawNodes.some(
+    (n) => n.name === 'Desk_Tier_1' || n.name === 'Wall_Lectern_Podium',
+  );
+  if (hasClassroomDesks && standaloneRandomFour) {
+    objects.push(
+      {
+        id: 'wall_lectern_monitor_hood',
+        label: 'Fixed Teaching Lectern Monitor Hood',
+        category: 'fixed_structure',
+        editable: false,
+        transform: { position: [-0.29, 0.0, -2.35], yawDeg: 0 },
+        baselineTransform: { position: [-0.29, 0.0, -2.35], yawDeg: 0 },
+        proxies: [
+          {
+            id: 'proxy_wall_lectern_monitor_hood_box',
+            kind: 'box',
+            localPosition: [0.0, 1.05, 0.0],
+            localYawDeg: 0,
+            size: [0.42, 2.1, 0.18],
+            blocksVisibility: true,
+            blocksMovement: false,
+          },
+        ],
+      },
+      {
+        id: 'wall_desk_tier1_apron_right',
+        label: 'Fixed Desk Tier 1 Front Apron',
+        category: 'fixed_structure',
+        editable: false,
+        transform: { position: [1.45, 0.16, -2.18], yawDeg: 0 },
+        baselineTransform: { position: [1.45, 0.16, -2.18], yawDeg: 0 },
+        proxies: [
+          {
+            id: 'proxy_wall_desk_tier1_apron_right_box',
+            kind: 'box',
+            localPosition: [0.0, 0.38, 0.0],
+            localYawDeg: 0,
+            size: [0.42, 0.76, 0.22],
+            blocksVisibility: false,
+            blocksMovement: true,
+          },
+        ],
+      },
+    );
+  }
+
+  // For standalone .glb scenes (`smallClassroom.glb`, `torium.glb`, `room.glb`), skip all movable props
+  // so repairs strictly shift chairs, walkways, and exits. Keep propGroups only for legacy non-standalone 24-place fixtures.
   const propGroups = new Map<
     string,
     {
@@ -1786,50 +1831,16 @@ export function parseAndLabelGlbVenue(
     }
   >();
 
-  for (const prop of rawPropNodes) {
-    const lower = prop.name.toLowerCase();
-    // Skip non-movable fixed lectern/student-laptop decorative sub-parts in standalone classroom scenes
-    if (
-      standaloneRandomFour &&
-      (lower.startsWith('lectern_') ||
-        lower.startsWith('flaw_') ||
-        lower.startsWith('stage_') ||
-        lower.startsWith('student_laptop_') ||
-        lower.startsWith('obs_student_backpack') ||
-        lower.startsWith('obs_aisle_backpacks') ||
-        lower.startsWith('obs_dualbin') ||
-        lower.startsWith('obs_lecture_capture_tripod'))
-    ) {
-      continue;
-    }
-
-    let groupKey = prop.name;
-    if (lower.startsWith('obs_rolling_whiteboard_easel')) {
-      groupKey = 'Obs_Rolling_Whiteboard_Easel';
-    } else if (lower.startsWith('obs_mobile_av_cart')) {
-      groupKey = 'Obs_Mobile_AV_Cart';
-    } else if (lower.startsWith('obs_lecture_capture_tripod')) {
-      groupKey = 'Obs_Lecture_Capture_Tripod';
-    } else if (
-      lower.startsWith('obs_aisle_backpacks') ||
-      lower.startsWith('obs_dualbin')
-    ) {
-      groupKey = 'Obs_Aisle_Backpacks_And_Bin';
-    } else if (lower.startsWith('lectern_')) {
-      continue;
-    }
-
-    const pMinX = prop.positionWorld[0] - prop.sizeWorld[0] * 0.5;
-    const pMaxX = prop.positionWorld[0] + prop.sizeWorld[0] * 0.5;
-    const pMinY = Math.max(0, prop.positionWorld[1]);
-    const pMaxY = Math.max(0.3, prop.positionWorld[1] + prop.sizeWorld[1]);
-    const pMinZ = prop.positionWorld[2] - prop.sizeWorld[2] * 0.5;
-    const pMaxZ = prop.positionWorld[2] + prop.sizeWorld[2] * 0.5;
-
-    const existing = propGroups.get(groupKey);
-    if (!existing) {
-      propGroups.set(groupKey, {
-        id: groupKey,
+  if (!standaloneRandomFour) {
+    for (const prop of rawPropNodes) {
+      const pMinX = prop.positionWorld[0] - prop.sizeWorld[0] * 0.5;
+      const pMaxX = prop.positionWorld[0] + prop.sizeWorld[0] * 0.5;
+      const pMinY = Math.max(0, prop.positionWorld[1]);
+      const pMaxY = Math.max(0.3, prop.positionWorld[1] + prop.sizeWorld[1]);
+      const pMinZ = prop.positionWorld[2] - prop.sizeWorld[2] * 0.5;
+      const pMaxZ = prop.positionWorld[2] + prop.sizeWorld[2] * 0.5;
+      propGroups.set(prop.name, {
+        id: prop.name,
         minX: pMinX,
         maxX: pMaxX,
         minY: pMinY,
@@ -1838,19 +1849,11 @@ export function parseAndLabelGlbVenue(
         maxZ: pMaxZ,
         yawDeg: prop.yawDeg,
       });
-    } else {
-      existing.minX = Math.min(existing.minX, pMinX);
-      existing.maxX = Math.max(existing.maxX, pMaxX);
-      existing.minY = Math.min(existing.minY, pMinY);
-      existing.maxY = Math.max(existing.maxY, pMaxY);
-      existing.minZ = Math.min(existing.minZ, pMinZ);
-      existing.maxZ = Math.max(existing.maxZ, pMaxZ);
     }
   }
 
   for (const composite of propGroups.values()) {
     const cx = Number(((composite.minX + composite.maxX) * 0.5).toFixed(4));
-    const cy = Number(Math.max(0, composite.minY).toFixed(4));
     const cz = Number(((composite.minZ + composite.maxZ) * 0.5).toFixed(4));
     const sx = Number(
       Math.max(0.2, composite.maxX - composite.minX).toFixed(4),
@@ -1862,13 +1865,12 @@ export function parseAndLabelGlbVenue(
       Math.max(0.16, composite.maxZ - composite.minZ).toFixed(4),
     );
     const blocksVis = composite.maxY >= 1.0;
-    const isPrdAccessBlocker = composite.id === 'Obs_Seminar_Supply_Table';
 
     objects.push({
       id: composite.id,
       label: `Movable Prop (${composite.id})`,
       category: 'movable_prop',
-      editable: true,
+      editable: !standaloneRandomFour,
       transform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
       baselineTransform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
       allowedBounds: {
@@ -1885,7 +1887,7 @@ export function parseAndLabelGlbVenue(
           localYawDeg: 0,
           size: [sx, sy, sz],
           blocksVisibility: blocksVis,
-          blocksMovement: !standaloneRandomFour || isPrdAccessBlocker,
+          blocksMovement: true,
         },
       ],
     });
@@ -2181,7 +2183,7 @@ export function parseAndLabelGlbVenue(
   if (standaloneRandomFour) {
     roster = spawnRandomFourAttendees(places, randomFn);
     if (
-      propGroups.has('Obs_Welcome_Sign_Standee') &&
+      (hasClassroomDesks || propGroups.has('Obs_Welcome_Sign_Standee')) &&
       places.some((p) => p.id === 'place_chair_r1_c5') &&
       places.some((p) => p.id === 'place_chair_r1_c8') &&
       places.some((p) => p.id === 'place_chair_r1_c2')
@@ -2473,63 +2475,6 @@ export function generateSampleCustomAuditoriumGlb(): {
             localPosition: [0.0, 0.25, 0.0],
             localYawDeg: 0,
             size: [7.2, 0.5, 2.0],
-            blocksVisibility: false,
-            blocksMovement: true,
-          },
-        ],
-      },
-      {
-        id: 'obj_prop_welcome_sign',
-        label: 'Movable Welcome Standee',
-        category: 'movable_prop',
-        editable: true,
-        transform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
-        baselineTransform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_welcome_sign',
-            kind: 'box',
-            localPosition: [0.0, 0.61, 0.0],
-            localYawDeg: 0,
-            size: [0.42, 1.22, 0.16],
-            blocksVisibility: true,
-            blocksMovement: true,
-          },
-        ],
-      },
-      {
-        id: 'obj_prop_catering_table',
-        label: 'Movable Front Table',
-        category: 'movable_prop',
-        editable: true,
-        transform: { position: [1.55, 0.0, -2.58], yawDeg: 0 },
-        baselineTransform: { position: [1.55, 0.0, -2.58], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_catering_table',
-            kind: 'box',
-            localPosition: [0.0, 0.22, 0.0],
-            localYawDeg: 0,
-            size: [1.8, 0.44, 0.3],
-            blocksVisibility: false,
-            blocksMovement: true,
-          },
-        ],
-      },
-      {
-        id: 'obj_prop_av_cart',
-        label: 'Movable AV Cart',
-        category: 'movable_prop',
-        editable: true,
-        transform: { position: [3.55, 0.0, 4.4], yawDeg: 0 },
-        baselineTransform: { position: [3.55, 0.0, 4.4], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_av_cart',
-            kind: 'box',
-            localPosition: [0.0, 0.45, 0.0],
-            localYawDeg: 0,
-            size: [0.44, 0.9, 0.44],
             blocksVisibility: false,
             blocksMovement: true,
           },

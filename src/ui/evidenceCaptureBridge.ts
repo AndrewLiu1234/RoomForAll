@@ -109,7 +109,85 @@ export function populateThreeSceneFromSnapshot(
     : undefined;
 
   if (standaloneGlbGroup) {
-    scene.add(standaloneGlbGroup.clone(true));
+    const clonedGlb = standaloneGlbGroup.clone(true);
+
+    // Apply any repaired chair shifts (transform - baselineTransform) directly onto the 3D .glb chair nodes!
+    const shiftedChairDeltas = new Map<
+      string,
+      { dx: number; dy: number; dz: number; dYawRad: number }
+    >();
+    for (const obj of snapshot.objects) {
+      if (obj.category !== 'movable_chair') continue;
+      const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
+      const dy = obj.transform.position[1] - obj.baselineTransform.position[1];
+      const dz = obj.transform.position[2] - obj.baselineTransform.position[2];
+      const dYaw = obj.transform.yawDeg - obj.baselineTransform.yawDeg;
+      if (
+        Math.abs(dx) > 1e-4 ||
+        Math.abs(dy) > 1e-4 ||
+        Math.abs(dz) > 1e-4 ||
+        Math.abs(dYaw) > 1e-4
+      ) {
+        shiftedChairDeltas.set(obj.id, {
+          dx,
+          dy,
+          dz,
+          dYawRad: dYaw * DEG_TO_RAD,
+        });
+      }
+    }
+
+    if (shiftedChairDeltas.size > 0) {
+      clonedGlb.traverse((node) => {
+        const delta = shiftedChairDeltas.get(node.name);
+        if (delta) {
+          node.position.x += delta.dx;
+          node.position.y += delta.dy;
+          node.position.z += delta.dz;
+          node.rotation.y += delta.dYawRad;
+        }
+      });
+    }
+
+    scene.add(clonedGlb);
+
+    // Render 3D Walkway Corridor Guidelines along active routes (`snapshot.routes`) so shifted/widened walkways are visible!
+    const occupiedRouteIds = new Set(
+      snapshot.roster
+        .map((r) => snapshot.places.find((p) => p.id === r.assignedPlaceId)?.routeId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    occupiedRouteIds.add('route_rear_main');
+
+    for (const route of snapshot.routes) {
+      if (!occupiedRouteIds.has(route.id) || route.waypoints.length < 2) {
+        continue;
+      }
+      const placesOnRoute = snapshot.places.filter(
+        (p) => p.routeId === route.id,
+      );
+      const routeY =
+        placesOnRoute.length > 0
+          ? Math.max(
+              0.02,
+              (snapshot.objects.find((o) => o.id === placesOnRoute[0]!.objectId)
+                ?.transform.position[1] ?? 0) + 0.015,
+            )
+          : 0.02;
+
+      const points = route.waypoints.map(
+        (wp) => new THREE.Vector3(wp[0], routeY, wp[1]),
+      );
+      const routeGeo = new THREE.BufferGeometry().setFromPoints(points);
+      const routeMat = new THREE.LineBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.55,
+      });
+      const routeLine = new THREE.Line(routeGeo, routeMat);
+      routeLine.name = `walkway_corridor_${route.id}`;
+      scene.add(routeLine);
+    }
 
     // Also render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
     const target = snapshot.target;

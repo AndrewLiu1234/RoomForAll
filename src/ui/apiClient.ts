@@ -262,56 +262,30 @@ export function createLocalFixtureRepairPreviewRun(
     (o) => o.id === 'obj_prop_sign_01',
   );
 
-  // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues
+  // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues:
+  // Repairs the scene ONLY by shifting chairs (movable_chair / chairGroups), walkways (updatedRoutes), and exits (addedExits).
   if (!hasDevSign) {
-    const candidateDeltas: Array<[number, 0, number]> = [
+    const candidateChairDeltas: Array<[number, number, number]> = [
       [-0.55, 0, 0],
       [0.55, 0, 0],
-      [0, 0, -0.55],
-      [0, 0, 0.55],
-      [-0.55, 0, -0.55],
-      [0.55, 0, 0.55],
+      [0, 0, 0.45],
+      [0, 0, -0.45],
+      [-0.55, 0, 0.45],
+      [0.55, 0, 0.45],
+      [-0.55, 0, -0.45],
+      [0.55, 0, -0.45],
+      [-0.35, 0, 0.35],
+      [0.35, 0, 0.35],
     ];
-    const editableProps = baselineSnapshot.objects
-      .filter((o) => o.editable && o.category === 'movable_prop')
-      .slice(0, 6);
 
     const ops: LayoutPatch['operations'] = [];
     let currentSnap = baselineSnapshot;
     let currentEval = baselineEvaluation;
 
-    for (const prop of editableProps) {
-      for (const delta of candidateDeltas) {
-        const trialPatch: LayoutPatch = {
-          contractVersion: CONTRACT_VERSION,
-          runId: 'preview_custom_glb',
-          parentSceneHash: currentSnap.sceneHash,
-          diagnosis: [],
-          operations: [
-            {
-              targetType: 'object',
-              targetId: prop.id,
-              deltaPositionM: delta,
-              deltaYawDeg: 0,
-              reason: `Relocate ${prop.id} by [${delta.join(', ')}]m to improve sightline or access clearance.`,
-            },
-          ],
-          summary: `Auto-repaired ${prop.id}.`,
-        };
-        const val = applyAndValidatePatch(baselineSnapshot, currentSnap, trialPatch);
-        if (val.valid && val.snapshot) {
-          const nextEval = evaluateSceneWithFallback(val.snapshot);
-          const cmp = compareEvaluations(currentEval, nextEval);
-          if (cmp.accepted) {
-            ops.push(trialPatch.operations[0]!);
-            currentSnap = val.snapshot;
-            currentEval = nextEval;
-            break;
-          }
-        }
-      }
-    }
+    const isStandaloneGlb =
+      baselineSnapshot.sceneId.startsWith('glb_standalone_');
 
+    // 1. Shift / add reachable exits (`addedExits`) first if any attendees are blocked by walls or isolated levels
     const addedExits = synthesizeReachableExitsForSnapshot(currentSnap);
     if (addedExits.length > 0) {
       currentSnap = withUpdatedSceneHash({
@@ -321,14 +295,140 @@ export function createLocalFixtureRepairPreviewRun(
       currentEval = evaluateSceneWithFallback(currentSnap);
     }
 
-    const improved = ops.length > 0 || addedExits.length > 0;
+    if (isStandaloneGlb) {
+      // 2. Shift obstructed chairs (or chair rows) for any attendee still failing sightline, legroom, or footprint requirements
+      for (const member of currentSnap.roster) {
+        const attEval = currentEval.attendees[member.attendeeId];
+        if (!attEval || attEval.clearAndUsable) continue;
+
+        const place = currentSnap.places.find(
+          (p) => p.id === member.assignedPlaceId,
+        );
+        const chairObj = place
+          ? currentSnap.objects.find((o) => o.id === place.objectId)
+          : undefined;
+        if (!place || !chairObj || !chairObj.editable) continue;
+
+        for (const delta of candidateChairDeltas) {
+          const trialPatch: LayoutPatch = {
+            contractVersion: CONTRACT_VERSION,
+            runId: 'preview_custom_glb',
+            parentSceneHash: currentSnap.sceneHash,
+            diagnosis: [],
+            operations: [
+              {
+                targetType: 'object',
+                targetId: chairObj.id,
+                deltaPositionM: delta,
+                deltaYawDeg: 0,
+                reason: `Shift chair ${chairObj.id} by [${delta.join(', ')}]m to clear sightline and front-legroom walkway clearance.`,
+              },
+            ],
+            summary: `Shifted chair ${chairObj.id}.`,
+          };
+          const val = applyAndValidatePatch(
+            baselineSnapshot,
+            currentSnap,
+            trialPatch,
+          );
+          if (val.valid && val.snapshot) {
+            const nextEval = evaluateSceneWithFallback(val.snapshot);
+            const cmp = compareEvaluations(currentEval, nextEval);
+            if (cmp.accepted) {
+              ops.push(trialPatch.operations[0]!);
+              currentSnap = val.snapshot;
+              currentEval = nextEval;
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      // Legacy non-standalone custom .glb fixture fallback
+      const editableProps = baselineSnapshot.objects
+        .filter((o) => o.editable && o.category === 'movable_prop')
+        .slice(0, 6);
+      for (const prop of editableProps) {
+        for (const delta of candidateChairDeltas) {
+          const trialPatch: LayoutPatch = {
+            contractVersion: CONTRACT_VERSION,
+            runId: 'preview_custom_glb',
+            parentSceneHash: currentSnap.sceneHash,
+            diagnosis: [],
+            operations: [
+              {
+                targetType: 'object',
+                targetId: prop.id,
+                deltaPositionM: delta,
+                deltaYawDeg: 0,
+                reason: `Relocate ${prop.id} by [${delta.join(', ')}]m.`,
+              },
+            ],
+            summary: `Auto-repaired ${prop.id}.`,
+          };
+          const val = applyAndValidatePatch(
+            baselineSnapshot,
+            currentSnap,
+            trialPatch,
+          );
+          if (val.valid && val.snapshot) {
+            const nextEval = evaluateSceneWithFallback(val.snapshot);
+            const cmp = compareEvaluations(currentEval, nextEval);
+            if (cmp.accepted) {
+              ops.push(trialPatch.operations[0]!);
+              currentSnap = val.snapshot;
+              currentEval = nextEval;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Shift & widen walkways (`updatedRoutes`) to align with shifted chairs and provide 1.15m clear aisle width
+    const updatedRoutes = currentSnap.routes.map((route) => {
+      const placesOnRoute = currentSnap.places.filter(
+        (p) => p.routeId === route.id,
+      );
+      const maxAnchorZ =
+        placesOnRoute.length > 0
+          ? Math.max(...placesOnRoute.map((p) => p.routeAnchorPoint[1]))
+          : null;
+      const newWaypoints = route.waypoints.map((wp, idx) => {
+        if (idx > 0 && maxAnchorZ !== null && route.id !== 'route_rear_main') {
+          return [wp[0], Number(maxAnchorZ.toFixed(3))] as [number, number];
+        }
+        return [wp[0], wp[1]] as [number, number];
+      });
+      return {
+        ...route,
+        widthM: Math.max(route.widthM, 1.15),
+        waypoints: newWaypoints,
+      };
+    });
+
+    currentSnap = withUpdatedSceneHash({
+      ...currentSnap,
+      routes: updatedRoutes,
+    });
+    currentEval = evaluateSceneWithFallback(currentSnap);
+
+    const improved =
+      ops.length > 0 || addedExits.length > 0 || updatedRoutes.length > 0;
     const summaryParts: string[] = [];
     if (ops.length > 0) {
-      summaryParts.push(`Applied ${ops.length} bounded prop adjustment(s)`);
+      summaryParts.push(
+        `Shifted ${ops.length} chair(s) (${ops.map((o) => `${o.targetId} by [${o.deltaPositionM.join(', ')}]m`).join('; ')})`,
+      );
+    }
+    if (updatedRoutes.length > 0) {
+      summaryParts.push(
+        `Shifted & widened ${updatedRoutes.length} walkway corridor(s) to 1.15m`,
+      );
     }
     if (addedExits.length > 0) {
       summaryParts.push(
-        `Added ${addedExits.length} reachable emergency exit(s) (${addedExits.map((e) => `${e.label} at [${e.position[0].toFixed(1)}, ${(e.elevationM ?? 0).toFixed(1)}, ${e.position[1].toFixed(1)}]m`).join('; ')}) so all attendees can evacuate without phasing through walls`,
+        `Added ${addedExits.length} reachable exit(s) (${addedExits.map((e) => `${e.label} at [${e.position[0].toFixed(1)}, ${(e.elevationM ?? 0).toFixed(1)}, ${e.position[1].toFixed(1)}]m`).join('; ')})`,
       );
     }
 
@@ -342,15 +442,16 @@ export function createLocalFixtureRepairPreviewRun(
           timestampSec: 1.0,
           observation:
             baselineEvaluation.evacuation?.evacuationImpossibleReason ??
-            `Evaluated ${editableProps.length} movable props and egress paths in uploaded .glb venue.`,
+            `Evaluated chairs, walkways, and exits in uploaded .glb venue.`,
         },
       ],
       operations: ops,
+      updatedRoutes,
       addedExits: addedExits.length > 0 ? addedExits : undefined,
       summary:
         summaryParts.length > 0
           ? `${summaryParts.join(' · ')}.`
-          : 'All attendees already have clear sightlines and unobstructed wall-free paths to exits.',
+          : 'All chairs, walkways, and exits already satisfy sightline and egress requirements.',
     };
 
     return {

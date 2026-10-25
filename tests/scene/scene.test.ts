@@ -968,13 +968,22 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
         clsEval.comparison.attendeesWithUnmetRequirements,
       ).toBeGreaterThan(0);
 
-      // Verify VenuePilot repairs the PRD-enumerated classroom obstructions (Obs_Welcome_Sign_Standee, Obs_Seminar_Supply_Table, Obs_Mobile_AV_Cart) to 0 unmet requirements
+      // Verify VenuePilot repairs the classroom ONLY by shifting chairs, walkways (updatedRoutes), and exits (addedExits)—never moving non-chair props
       const clsPreview = createLocalFixtureRepairPreviewRun(clsReport.snapshot);
       expect(clsPreview.outcome).toBe('improved');
       expect(clsPreview.bestEvaluation.allModeledRequirementsMet).toBe(true);
       expect(
         clsPreview.bestEvaluation.comparison.attendeesWithUnmetRequirements,
       ).toBe(0);
+      const clsPatch = clsPreview.attempts[0]!.patch;
+      expect(clsPatch.operations.length).toBeGreaterThan(0);
+      for (const op of clsPatch.operations) {
+        const targetObj = clsReport.snapshot.objects.find(
+          (o) => o.id === op.targetId,
+        );
+        expect(targetObj?.category).toBe('movable_chair');
+      }
+      expect(clsPatch.updatedRoutes?.length).toBeGreaterThan(0);
 
       // Verify ExitFinderAgent parsed both exits (Exit_1_FrontLeft and Exit_2_FrontRight) into snapshot.exits
       // and evacuating people navigate to those exact exit points and disappear (state === 'exited')
