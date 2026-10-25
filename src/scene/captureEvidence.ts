@@ -375,10 +375,15 @@ async function recordBrowserCanvasClip(params: {
     const fps = 24;
     const stream = captureStreamFn.call(targetCanvas, fps);
     const chosenMime = selectSupportedMediaMimeType();
-    const recorder = new MediaRecorder(stream, {
-      mimeType: chosenMime,
-      videoBitsPerSecond: 1_500_000,
-    });
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, {
+        mimeType: chosenMime,
+        videoBitsPerSecond: 1_500_000,
+      });
+    } catch {
+      recorder = new MediaRecorder(stream);
+    }
 
     const chunks: Blob[] = [];
     recorder.ondataavailable = (evt: BlobEvent) => {
@@ -454,6 +459,11 @@ async function recordBrowserCanvasClip(params: {
         if (elapsedWallMs >= wallDurationMs) {
           cleanupTimer();
           if (recorder.state === 'recording') {
+            try {
+              recorder.requestData?.();
+            } catch {
+              // Ignore if browser does not support explicit requestData flush
+            }
             recorder.stop();
           }
         }

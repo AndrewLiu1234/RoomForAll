@@ -530,6 +530,113 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(loaded.sceneHash).toBe(createPreparedVenueSnapshot().sceneHash);
   });
 
+  it('exercises the browser MediaRecorder + 2D canvas + telemetry slate path in captureEvidence when DOM globals exist', async () => {
+    const snapshot = createDevFixtureSnapshot();
+    const g = globalThis as Record<string, unknown>;
+    const prevWindow = g.window;
+    const prevDocument = g.document;
+    const prevMediaRecorder = g.MediaRecorder;
+
+    const slateTexts: string[] = [];
+    let trackStopped = false;
+
+    try {
+      const mockCtx2d = {
+        save: () => {},
+        restore: () => {},
+        fillRect: () => {},
+        fillText: (text: string) => {
+          slateTexts.push(text);
+        },
+        drawImage: () => {},
+        beginPath: () => {},
+        arc: () => {},
+        stroke: () => {},
+        fillStyle: '',
+        strokeStyle: '',
+        lineWidth: 1,
+        font: '',
+      };
+
+      g.window = {};
+      g.document = {
+        createElement: (tag: string) => {
+          if (tag === 'canvas') {
+            return {
+              width: 512,
+              height: 512,
+              getContext: (kind: string) => (kind === '2d' ? mockCtx2d : null),
+              captureStream: () => ({
+                getTracks: () => [
+                  {
+                    stop: () => {
+                      trackStopped = true;
+                    },
+                  },
+                ],
+                getVideoTracks: () => [
+                  {
+                    requestFrame: () => {},
+                  },
+                ],
+              }),
+            };
+          }
+          return {};
+        },
+      };
+
+      class MockMediaRecorder {
+        static isTypeSupported(mime: string): boolean {
+          return mime === 'video/webm;codecs=vp8';
+        }
+        state = 'inactive';
+        mimeType = 'video/webm;codecs=vp8';
+        ondataavailable: ((evt: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        start(): void {
+          this.state = 'recording';
+        }
+        requestData(): void {
+          this.ondataavailable?.({
+            data: new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3])], {
+              type: 'video/webm',
+            }),
+          });
+        }
+        stop(): void {
+          this.state = 'inactive';
+          this.onstop?.();
+        }
+      }
+
+      g.MediaRecorder = MockMediaRecorder;
+
+      const { videoBlob, manifest } = await captureEvidence(snapshot, {
+        captureId: 'cap_browser_sim',
+        runId: 'run_browser_sim',
+        phase: 'baseline',
+        sceneHash: snapshot.sceneHash,
+        snapshot,
+        keyframes: [],
+        totalDurationSec: 0.15,
+        deadlineIso: new Date(Date.now() + 30_000).toISOString(),
+      });
+
+      expect(videoBlob.size).toBeGreaterThan(0);
+      expect(manifest.mimeType).toBe('video/webm');
+      expect(manifest.byteLength).toBe(videoBlob.size);
+      expect(trackStopped).toBe(true);
+      expect(slateTexts.length).toBeGreaterThan(0);
+      expect(slateTexts[0]).toContain('view_overview_main');
+    } finally {
+      g.window = prevWindow;
+      g.document = prevDocument;
+      g.MediaRecorder = prevMediaRecorder;
+    }
+  });
+
   it('instantiates VenueViewport and computes finite spherical orbit coordinates across all presets', () => {
     const snapshot = createPreparedVenueSnapshot();
     for (const preset of ['front_high', 'top_down', 'stage_oblique'] as const) {

@@ -346,6 +346,7 @@ export function VenueViewport({
   const handleSelectPreset = (preset: OverviewCameraPreset) => {
     setActivePreset(preset);
     orbitRef.current = computeInitialOrbit(snapshot, preset);
+    renderFnRef.current?.();
   };
 
   // 3. Scene & Camera Update Effect: Rebuilds only the lightweight Three.js Scene graph and renders on existing WebGLRenderer
