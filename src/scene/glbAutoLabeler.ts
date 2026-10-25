@@ -27,6 +27,7 @@ import {
   type SceneSnapshot,
   type Vec2,
   type Vec3,
+  type VenueExitPortal,
 } from '../shared/index.js';
 import {
   generateVenueGlbBinary,
@@ -1578,10 +1579,33 @@ export function parseAndLabelGlbVenue(
     });
   }
 
+  const realExitPortals: VenueExitPortal[] = exitNodes
+    .filter((en) => {
+      const lower = en.name.toLowerCase();
+      // Exclude parent grouping nodes with 0-size or origin placeholder coordinates
+      if (lower.endsWith('_group') || lower === 'exits_group') return false;
+      return Math.hypot(en.positionWorld[0], en.positionWorld[2]) > 0.1;
+    })
+    .map((en, idx) => ({
+      id: en.name,
+      label: `Parsed Exit (${en.name})`,
+      position: [
+        Number(en.positionWorld[0].toFixed(3)),
+        Number(en.positionWorld[2].toFixed(3)),
+      ],
+      widthM: Number(
+        Math.max(0.95, Math.min(1.6, Math.max(en.sizeWorld[0], en.sizeWorld[2]))).toFixed(2),
+      ),
+      yawDeg: en.yawDeg,
+      isEmergencyExit: idx > 0,
+    }));
+
   const entrancePoint: Vec2 =
-    exitNodes.length > 0 && !standaloneRandomFour
-      ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
-      : [Number((roomBounds.min[0] + 0.8).toFixed(2)), 5.8];
+    realExitPortals.length > 0
+      ? [realExitPortals[0]!.position[0], realExitPortals[0]!.position[1]]
+      : exitNodes.length > 0
+        ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
+        : [Number((roomBounds.min[0] + 0.8).toFixed(2)), 5.8];
 
   const rearCorridorZ = standaloneRandomFour ? 5.45 : 5.35;
   const routes: RouteCorridor[] = [
@@ -1926,6 +1950,7 @@ export function parseAndLabelGlbVenue(
     chairGroups,
     places,
     routes,
+    ...(realExitPortals.length > 0 ? { exits: realExitPortals } : {}),
     profiles: structuredClone(DEFAULT_PROFILE_REQUIREMENTS),
     roster,
   });
@@ -1945,7 +1970,8 @@ export function parseAndLabelGlbVenue(
     counts: {
       seats: seatNodes.length,
       wheelchairBays: bayNodes.length,
-      exitsAndEntrances: exitNodes.length,
+      exitsAndEntrances:
+        realExitPortals.length > 0 ? realExitPortals.length : exitNodes.length,
       stagesAndScreens: (stageNode ? 1 : 0) + 1,
       pillarsAndStructures: pillarNodes.length,
       movableProps: propGroups.size,

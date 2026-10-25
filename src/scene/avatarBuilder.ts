@@ -512,6 +512,7 @@ export function buildVenueExitPortalNodes(snapshot: SceneSnapshot): THREE.Group 
   const portalsGroup = new THREE.Group();
   portalsGroup.name = 'venue_exit_portals';
 
+  const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
   const portals = getVenueExitPortals(snapshot);
   for (const portal of portals) {
     const group = new THREE.Group();
@@ -522,40 +523,42 @@ export function buildVenueExitPortalNodes(snapshot: SceneSnapshot): THREE.Group 
     const doorW = portal.widthM;
     const doorH = 2.15;
 
-    // Door frame posts & header
-    const frameMat = new THREE.MeshStandardMaterial({
-      color: portal.isEmergencyExit ? 0x059669 : 0x0284c7,
-      roughness: 0.4,
-      metalness: 0.3,
-    });
+    if (!isStandaloneGlb) {
+      // Door frame posts & header for procedural venues
+      const frameMat = new THREE.MeshStandardMaterial({
+        color: portal.isEmergencyExit ? 0x059669 : 0x0284c7,
+        roughness: 0.4,
+        metalness: 0.3,
+      });
 
-    const postGeo = new THREE.BoxGeometry(0.08, doorH, 0.12);
-    const leftPost = new THREE.Mesh(postGeo, frameMat);
-    leftPost.position.set(-doorW * 0.5, doorH * 0.5, 0);
-    group.add(leftPost);
+      const postGeo = new THREE.BoxGeometry(0.08, doorH, 0.12);
+      const leftPost = new THREE.Mesh(postGeo, frameMat);
+      leftPost.position.set(-doorW * 0.5, doorH * 0.5, 0);
+      group.add(leftPost);
 
-    const rightPost = new THREE.Mesh(postGeo, frameMat);
-    rightPost.position.set(doorW * 0.5, doorH * 0.5, 0);
-    group.add(rightPost);
+      const rightPost = new THREE.Mesh(postGeo, frameMat);
+      rightPost.position.set(doorW * 0.5, doorH * 0.5, 0);
+      group.add(rightPost);
 
-    const headerGeo = new THREE.BoxGeometry(doorW + 0.12, 0.1, 0.14);
-    const header = new THREE.Mesh(headerGeo, frameMat);
-    header.position.set(0, doorH + 0.05, 0);
-    group.add(header);
+      const headerGeo = new THREE.BoxGeometry(doorW + 0.12, 0.1, 0.14);
+      const header = new THREE.Mesh(headerGeo, frameMat);
+      header.position.set(0, doorH + 0.05, 0);
+      group.add(header);
 
-    // Illuminated Overhead EXIT Sign Box
-    const signBoxGeo = new THREE.BoxGeometry(0.56, 0.22, 0.08);
-    const signBoxMat = new THREE.MeshStandardMaterial({
-      color: 0x10b981,
-      emissive: 0x059669,
-      emissiveIntensity: 0.75,
-      roughness: 0.25,
-    });
-    const signBox = new THREE.Mesh(signBoxGeo, signBoxMat);
-    signBox.position.set(0, doorH + 0.22, 0);
-    group.add(signBox);
+      // Illuminated Overhead EXIT Sign Box
+      const signBoxGeo = new THREE.BoxGeometry(0.56, 0.22, 0.08);
+      const signBoxMat = new THREE.MeshStandardMaterial({
+        color: 0x10b981,
+        emissive: 0x059669,
+        emissiveIntensity: 0.75,
+        roughness: 0.25,
+      });
+      const signBox = new THREE.Mesh(signBoxGeo, signBoxMat);
+      signBox.position.set(0, doorH + 0.22, 0);
+      group.add(signBox);
+    }
 
-    // Floor egress mat
+    // Floor egress mat at exact exit portal coordinate
     const matGeo = new THREE.PlaneGeometry(doorW, 0.55);
     const matMesh = new THREE.Mesh(
       matGeo,

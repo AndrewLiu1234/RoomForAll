@@ -319,13 +319,30 @@ function buildAgentEgressWaypoints(
     waypoints.push(rowAislePoint);
   }
 
-  // 2. If routing to East Secondary Emergency Exit and seat is on the east side, head toward the east perimeter aisle
-  if (bestExit.id === 'exit_emergency_east' && seatPos[0] >= -0.2) {
+  // 2. If routing to a side/front exit (like exit_emergency_east or Exit_1_FrontLeft / Exit_2_FrontRight),
+  // step laterally to the perimeter aisle X aligned with bestExit, then proceed to the exit door
+  const isEastSideExit =
+    bestExit.id === 'exit_emergency_east' ||
+    bestExit.position[0] > 1.8;
+  const isWestSideExit = bestExit.position[0] < -1.8;
+
+  if (isEastSideExit && seatPos[0] >= -0.4) {
     const eastAisleX = Math.min(
-      snapshot.roomBounds.max[0] - 0.95,
-      bestExit.position[0] - 0.45,
+      snapshot.roomBounds.max[0] - 0.85,
+      Math.max(2.4, bestExit.position[0] - 0.35),
     );
     waypoints.push([eastAisleX, anchor[1]]);
+    waypoints.push([bestExit.position[0], bestExit.position[1]]);
+    return { waypoints, targetExitId: bestExit.id };
+  }
+
+  if (isWestSideExit && bestExit.position[1] < 0) {
+    // Front-left exit (e.g. Exit_1_FrontLeft in smallClassroom.glb): step to west aisle X then forward to -Z door
+    const westAisleX = Math.max(
+      snapshot.roomBounds.min[0] + 0.85,
+      Math.min(-2.4, bestExit.position[0] + 0.35),
+    );
+    waypoints.push([westAisleX, anchor[1]]);
     waypoints.push([bestExit.position[0], bestExit.position[1]]);
     return { waypoints, targetExitId: bestExit.id };
   }
@@ -335,8 +352,6 @@ function buildAgentEgressWaypoints(
 
   const route = snapshot.routes.find((r) => r.id === place.routeId);
   if (route && route.waypoints.length >= 2) {
-    // Route waypoints in SceneSnapshot are ordered from Entrance [0] -> Interior [last].
-    // For egress, walk toward waypoint[0] (or toward bestExit).
     const entranceWp = route.waypoints[0]!;
     const midWp: Vec2 = [entranceWp[0], anchor[1]];
     if (Math.hypot(midWp[0] - anchor[0], midWp[1] - anchor[1]) > 0.25) {
