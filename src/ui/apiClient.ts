@@ -263,22 +263,51 @@ export function createLocalFixtureRepairPreviewRun(
   // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues
   if (!hasDevSign) {
     const candidateDeltas: Array<[number, 0, number]> = [
+      [-0.6, 0, 0],
+      [0.6, 0, 0],
       [-0.55, 0, 0],
       [0.55, 0, 0],
       [0, 0, -0.55],
       [0, 0, 0.55],
-      [-0.55, 0, -0.55],
-      [0.55, 0, 0.55],
+      [-0.6, 0, -0.55],
+      [0.6, 0, -0.55],
+      [-0.6, 0, 0.55],
+      [0.6, 0, 0.55],
     ];
     const editableProps = baselineSnapshot.objects
       .filter((o) => o.editable && o.category === 'movable_prop')
-      .slice(0, 6);
+      .slice(0, 4);
+
+    // Also include any occupied chairs whose attendee currently has an obstructed view or failed requirement
+    const obstructedChairObjs = baselineSnapshot.roster
+      .filter((m) => {
+        const att = baselineEvaluation.attendees[m.attendeeId];
+        return att && (!att.isViewClear || !att.usable);
+      })
+      .map((m) => {
+        const place = baselineSnapshot.places.find(
+          (p) => p.id === m.assignedPlaceId,
+        );
+        return place
+          ? baselineSnapshot.objects.find((o) => o.id === place.objectId)
+          : undefined;
+      })
+      .filter((o): o is NonNullable<typeof o> => Boolean(o && o.editable));
+
+    const candidateTargets = [...editableProps, ...obstructedChairObjs].slice(
+      0,
+      6,
+    );
 
     const ops: LayoutPatch['operations'] = [];
     let currentSnap = baselineSnapshot;
     let currentEval = baselineEvaluation;
 
-    for (const prop of editableProps) {
+    for (const targetObj of candidateTargets) {
+      let bestTargetOp: LayoutPatch['operations'][number] | null = null;
+      let bestTargetSnap = currentSnap;
+      let bestTargetEval = currentEval;
+
       for (const delta of candidateDeltas) {
         const trialPatch: LayoutPatch = {
           contractVersion: CONTRACT_VERSION,
@@ -288,25 +317,34 @@ export function createLocalFixtureRepairPreviewRun(
           operations: [
             {
               targetType: 'object',
-              targetId: prop.id,
+              targetId: targetObj.id,
               deltaPositionM: delta,
               deltaYawDeg: 0,
-              reason: `Relocate ${prop.id} by [${delta.join(', ')}]m to improve sightline or access clearance.`,
+              reason: `Relocate ${targetObj.id} by [${delta.join(', ')}]m to clear sightline and egress corridors.`,
             },
           ],
-          summary: `Auto-repaired ${prop.id}.`,
+          summary: `Auto-repaired ${targetObj.id}.`,
         };
-        const val = applyAndValidatePatch(baselineSnapshot, currentSnap, trialPatch);
+        const val = applyAndValidatePatch(
+          baselineSnapshot,
+          currentSnap,
+          trialPatch,
+        );
         if (val.valid && val.snapshot) {
           const nextEval = evaluateSceneWithFallback(val.snapshot);
-          const cmp = compareEvaluations(currentEval, nextEval);
+          const cmp = compareEvaluations(bestTargetEval, nextEval);
           if (cmp.accepted) {
-            ops.push(trialPatch.operations[0]!);
-            currentSnap = val.snapshot;
-            currentEval = nextEval;
-            break;
+            bestTargetOp = trialPatch.operations[0]!;
+            bestTargetSnap = val.snapshot;
+            bestTargetEval = nextEval;
           }
         }
+      }
+
+      if (bestTargetOp) {
+        ops.push(bestTargetOp);
+        currentSnap = bestTargetSnap;
+        currentEval = bestTargetEval;
       }
     }
 

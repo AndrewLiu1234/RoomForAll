@@ -109,9 +109,33 @@ export function populateThreeSceneFromSnapshot(
     : undefined;
 
   if (standaloneGlbGroup) {
-    scene.add(standaloneGlbGroup.clone(true));
+    const glbClone = standaloneGlbGroup.clone(true);
+    // Apply any repaired SceneObject transform deltas directly to the corresponding GLB mesh nodes!
+    for (const obj of snapshot.objects) {
+      const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
+      const dy = obj.transform.position[1] - obj.baselineTransform.position[1];
+      const dz = obj.transform.position[2] - obj.baselineTransform.position[2];
+      const dYaw = obj.transform.yawDeg - obj.baselineTransform.yawDeg;
+      if (
+        Math.abs(dx) > 1e-4 ||
+        Math.abs(dy) > 1e-4 ||
+        Math.abs(dz) > 1e-4 ||
+        Math.abs(dYaw) > 1e-4
+      ) {
+        const targetNode = glbClone.getObjectByName(obj.id);
+        if (targetNode) {
+          targetNode.position.x += dx;
+          targetNode.position.y += dy;
+          targetNode.position.z += dz;
+          targetNode.rotation.y += dYaw * DEG_TO_RAD;
+        }
+      }
+    }
+    scene.add(glbClone);
+  }
 
-    // Also render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
+  if (isStandaloneGlb) {
+    // Render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
     const target = snapshot.target;
     const targetOutlineGroup = new THREE.Group();
     targetOutlineGroup.position.set(
@@ -181,7 +205,7 @@ export function populateThreeSceneFromSnapshot(
 
       scene.add(exitPointGroup);
     }
-  } else if (!isStandaloneGlb) {
+  } else {
     // Room floor
     const roomWidth = snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0];
     const roomDepth = snapshot.roomBounds.max[2] - snapshot.roomBounds.min[2];
@@ -523,6 +547,7 @@ export function populateThreeSceneFromSnapshot(
     if (
       isStandaloneGlb &&
       (obj.category === 'movable_chair' ||
+        obj.category === 'movable_prop' ||
         obj.category === 'stage' ||
         obj.category === 'fixed_structure')
     ) {

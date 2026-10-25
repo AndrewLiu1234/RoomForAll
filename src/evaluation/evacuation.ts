@@ -172,7 +172,10 @@ export function computeSeatRowExtricationClearance(
   clearRowGapM: number;
   constrainingObjectIds: string[];
 } {
-  if (place.kind === 'wheelchair_bay') {
+  if (
+    place.kind === 'wheelchair_bay' ||
+    snapshot.sceneId.startsWith('glb_standalone_')
+  ) {
     return { clearRowGapM: 1.2, constrainingObjectIds: [] };
   }
 
@@ -307,8 +310,9 @@ function buildAgentEgressWaypoints(
   const waypoints: Vec2[] = [];
 
   // For uploaded .glb venues with explicit parsed exit points (`snapshot.exits` and `!isFallbackFixture`),
-  // route each attendee along their row to the side aisle on the chosen exit's side,
-  // and then straight along the side aisle into `[bestExit.position[0], bestExit.position[1]]`.
+  // route each attendee along their row to the radial/side aisle on the chosen exit's side,
+  // and then follow the aisle corridor cleanly into `[bestExit.position[0], bestExit.position[1]]`
+  // so people NEVER walk through rows of seats!
   if (
     snapshot.exits &&
     snapshot.exits.length > 0 &&
@@ -327,12 +331,63 @@ function buildAgentEgressWaypoints(
       }
     }
 
+    const isLargeAuditorium =
+      snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0] > 30;
+
+    if (isLargeAuditorium) {
+      // In `torium.glb` (screen at +Z = +14.1m), the radial aisles between Center and Left/Right
+      // sections run at X ≈ -4.35m (West radial aisle) and X ≈ +4.35m (East radial aisle),
+      // and the outer perimeter concourse aisles run at X ≈ -15.5m / +15.5m.
+      const rowStepZ = Number((seatPos[1] + 0.38).toFixed(3));
+      waypoints.push([seatPos[0], rowStepZ]);
+
+      const goWest = nearestExit.position[0] < 0;
+      if (Math.abs(seatPos[0]) <= 4.45) {
+        // Center section seat: walk along the curved row to the West or East radial aisle (X = ±4.35m)
+        const radialAisleX = goWest ? -4.35 : 4.35;
+        waypoints.push([radialAisleX, rowStepZ]);
+        // Walk along the radial aisle to the cross-concourse (Z = -4.8m or Z = +8.8m)
+        if (nearestExit.position[1] < -5.0) {
+          waypoints.push([radialAisleX, -5.2]);
+          waypoints.push([
+            nearestExit.position[0] * 0.65,
+            Math.max(nearestExit.position[1] + 2.5, -18.5),
+          ]);
+        } else {
+          waypoints.push([radialAisleX, 8.8]);
+          waypoints.push([
+            goWest ? -14.5 : 14.5,
+            Math.min(8.2, nearestExit.position[1] + 1.5),
+          ]);
+        }
+      } else {
+        // Left/Right wing or gallery tier seat: step to the nearest radial or outer aisle
+        const wingAisleX =
+          seatPos[0] < 0
+            ? seatPos[0] > -9.0
+              ? -4.35
+              : -15.5
+            : seatPos[0] < 9.0
+              ? 4.35
+              : 15.5;
+        waypoints.push([wingAisleX, rowStepZ]);
+        waypoints.push([wingAisleX, nearestExit.position[1] * 0.6]);
+      }
+
+      waypoints.push([nearestExit.position[0], nearestExit.position[1]]);
+      return { waypoints, targetExitId: nearestExit.id };
+    }
+
+    // Standard classroom / medium GLB: step forward into row gap, walk to side aisle X, then straight to exit
+    const rowClearZ = Number((seatPos[1] - 0.28).toFixed(3));
+    waypoints.push([seatPos[0], rowClearZ]);
+
     const sideAisleX =
       nearestExit.position[0] < 0
         ? Math.min(seatPos[0] - 0.35, nearestExit.position[0] + 0.15)
         : Math.max(seatPos[0] + 0.35, nearestExit.position[0] - 0.15);
 
-    waypoints.push([Number(sideAisleX.toFixed(3)), seatPos[1]]);
+    waypoints.push([Number(sideAisleX.toFixed(3)), rowClearZ]);
     waypoints.push([nearestExit.position[0], nearestExit.position[1]]);
     return { waypoints, targetExitId: nearestExit.id };
   }

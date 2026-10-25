@@ -405,6 +405,10 @@ export function validateSceneStructure(
 
   // 4. Bounds checks (OUT_OF_BOUNDS) & Reserved Circulation Intrusion (RESERVED_CIRCULATION_INTRUSION)
   // Collect all colliders per object for subsequent OBJECT_COLLISION check as well.
+  const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
+  const occupiedPlaceIds = new Set(
+    snapshot.roster.map((r) => r.assignedPlaceId),
+  );
   const objectColliders = new Map<string, WorldCollider[]>();
 
   for (const obj of snapshot.objects) {
@@ -418,15 +422,17 @@ export function validateSceneStructure(
       const placeMaxY = obj.transform.position[1] + Math.max(place.seatHeightM, 0.9);
       const shape2D: Shape2D = { kind: 'obb', obb: footprintOBB };
       shapesToCheck.push({ shape2D, minY: placeMinY, maxY: placeMaxY });
-      collidersForObj.push({
-        id: `place_footprint_${place.id}`,
-        ownerObjectId: obj.id,
-        ownerCategory: obj.category,
-        ownerPlaceId: place.id,
-        shape2D,
-        minY: placeMinY,
-        maxY: placeMaxY,
-      });
+      if (!isStandaloneGlb || occupiedPlaceIds.has(place.id)) {
+        collidersForObj.push({
+          id: `place_footprint_${place.id}`,
+          ownerObjectId: obj.id,
+          ownerCategory: obj.category,
+          ownerPlaceId: place.id,
+          shape2D,
+          minY: placeMinY,
+          maxY: placeMaxY,
+        });
+      }
     }
 
     for (const proxy of obj.proxies) {

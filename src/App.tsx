@@ -296,6 +296,45 @@ export function App(): React.ReactElement {
 
   const handleSelectVenuePreset = (preset: VenuePresetMode): void => {
     if (activeRun && activeRun.state !== 'finished') return;
+    if (preset === 'torium_glb') {
+      void (async () => {
+        setErrorText(null);
+        try {
+          const resp = await fetch('/venue/torium.glb');
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status} loading /venue/torium.glb`);
+          }
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          const report = await parseAndLabelGlbVenueAsync(buf, {
+            fileName: 'torium.glb',
+            yieldDelayMs: 60,
+            standaloneRandomFour: true,
+            onProgress: (upd) => setGlbParseProgress(upd),
+          });
+          setGlbParseReport(report);
+          setVenuePreset('torium_glb');
+          setBaselineSnapshot(report.snapshot);
+          setBaselineEvaluation(evaluateSceneWithFallback(report.snapshot));
+          setActiveRun(null);
+          setViewingStage('baseline');
+          setTimeout(() => setGlbParseProgress(null), 500);
+          setCaptureStatusText(
+            `Loaded Auditorium (torium.glb): parsed ${report.counts.seats} 3D seats, ${report.counts.exitsAndEntrances} perimeter exits, Sight Target "${report.snapshot.target.id}", and ${report.counts.movableProps} movable props.`,
+          );
+          setSelectedAttendeeId(
+            report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
+              ?.attendeeId ??
+              report.snapshot.roster[0]?.attendeeId ??
+              '',
+          );
+        } catch (err) {
+          setErrorText(
+            err instanceof Error ? err.message : 'Failed to load torium.glb',
+          );
+        }
+      })();
+      return;
+    }
     if (preset === 'classroom_50') {
       void (async () => {
         setErrorText(null);

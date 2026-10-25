@@ -13,6 +13,7 @@ import type {
 export type VenuePresetMode =
   | 'prepared_24'
   | 'bunched_emergency_24'
+  | 'torium_glb'
   | 'dev_4'
   | 'classroom_50'
   | 'custom_glb';
@@ -151,23 +152,13 @@ export function RunProgressBanner({
             <button
               type="button"
               className={`vp-segment-btn vp-focusable ${
-                venuePreset === 'classroom_50' ? 'vp-segment-btn-active' : ''
+                venuePreset === 'torium_glb' ? 'vp-segment-btn-active' : ''
               }`}
               disabled={isRunning || isCapturingClip}
-              onClick={() => onSelectVenuePreset('classroom_50')}
-              title="Load 50-Seat Tiered Classroom (smallClassroom.glb) with 5 curved tiers, Screen_Projection_16x9 target, and 4 random people"
+              onClick={() => onSelectVenuePreset('torium_glb')}
+              title="Load Auditorium (torium.glb) with 4 perimeter exits, Target_Presentation_Screen, and 4 Orchestra attendees"
             >
-              Classroom · 50 (.glb)
-            </button>
-            <button
-              type="button"
-              className={`vp-segment-btn vp-focusable ${
-                venuePreset === 'dev_4' ? 'vp-segment-btn-active' : ''
-              }`}
-              disabled={isRunning || isCapturingClip}
-              onClick={() => onSelectVenuePreset('dev_4')}
-            >
-              Compact Hall · 4
+              Auditorium (torium.glb)
             </button>
           </div>
         )}

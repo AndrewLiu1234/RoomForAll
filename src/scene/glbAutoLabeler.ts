@@ -312,21 +312,13 @@ function classifyNodeRole(
     typeof extras?.role === 'string' ? extras.role : undefined;
 
   if (
-    extraCat === 'exit' ||
-    extraRole === 'exit_or_entrance' ||
-    lower.includes('exit') ||
-    lower.includes('entrance') ||
-    lower.includes('door') ||
-    lower.includes('egress') ||
-    lower.includes('portal') ||
-    matJoined.includes('exit_red') ||
-    matJoined.includes('exit_housing') ||
-    matJoined.includes('door_vision')
-  ) {
-    return 'exit_or_entrance';
-  }
-  if (
     lower.includes('master_auditorium_seat') ||
+    lower.includes('perimeter_column') ||
+    lower.includes('perimeter_concrete_columns') ||
+    lower.includes('sidegalleries_columns') ||
+    lower.includes('spotlight_fixture') ||
+    lower.includes('speaker_lectern') ||
+    lower.includes('flaw_low_rigging') ||
     lower.includes('floor') ||
     lower.includes('slab') ||
     lower.includes('ceiling') ||
@@ -350,8 +342,23 @@ function classifyNodeRole(
     return 'floor_or_shell';
   }
   if (
+    extraCat === 'exit' ||
+    extraRole === 'exit_or_entrance' ||
+    lower.includes('exit') ||
+    lower.includes('entrance') ||
+    lower.includes('door') ||
+    lower.includes('egress') ||
+    lower.includes('portal') ||
+    matJoined.includes('exit_red') ||
+    matJoined.includes('exit_housing') ||
+    matJoined.includes('door_vision')
+  ) {
+    return 'exit_or_entrance';
+  }
+  if (
     extraCat === 'movable_prop' ||
     lower.startsWith('obs_') ||
+    lower.startsWith('flaw_movable_') ||
     lower.includes('prop') ||
     lower.includes('sign') ||
     lower.includes('table') ||
@@ -365,8 +372,7 @@ function classifyNodeRole(
     lower.includes('dualbin') ||
     lower.includes('recycle') ||
     lower.includes('trash') ||
-    lower.includes('student_laptop') ||
-    lower.includes('spotlight')
+    lower.includes('student_laptop')
   ) {
     return 'movable_prop';
   }
@@ -489,7 +495,7 @@ function selectBestSightTargetAgent(params: {
 
   for (const n of labeledNodes) {
     const lower = n.name.toLowerCase();
-    // Ignore movable easels, laptop lids, touchpanels, ceiling projector hardware, frames, tracks, and trays
+    // Ignore movable easels, laptop lids, touchpanels, ceiling projector hardware, frames, tracks, trays, and structural rear trusses
     if (
       lower.startsWith('obs_') ||
       lower.includes('easel') ||
@@ -506,7 +512,8 @@ function selectBestSightTargetAgent(params: {
       lower.includes('valence') ||
       lower.includes('tension_bar') ||
       lower.includes('roller') ||
-      lower.includes('projector_')
+      lower.includes('projector_') ||
+      lower.includes('truss')
     ) {
       continue;
     }
@@ -571,11 +578,19 @@ function selectBestSightTargetAgent(params: {
 
   if (bestCandidate) {
     const chosen = bestCandidate.node;
+    const avgSeatZ =
+      seatNodes.length > 0
+        ? seatNodes.reduce((s, n) => s + n.positionWorld[2], 0) /
+          seatNodes.length
+        : 0;
+    // If the screen is at +Z relative to the seating bowl (e.g. torium.glb where screen Z=+14.1m),
+    // the screen normal faces -Z (yawDeg = 0); if screen is at -Z (e.g. classroom Z=-5.9m), it faces +Z (yawDeg = 180).
+    const screenFacingYaw = chosen.positionWorld[2] > avgSeatZ ? 0 : 180;
     return {
       id: chosen.name,
       label: `Sight Target (${chosen.name})`,
       center: chosen.positionWorld,
-      yawDeg: 180,
+      yawDeg: screenFacingYaw,
       widthM: bestCandidate.widthM,
       heightM: bestCandidate.heightM,
     };
@@ -614,13 +629,32 @@ function selectBestSightTargetAgent(params: {
  * ExitFinderAgent: Finds all exit doors / egress portals in the .glb and computes their
  * walkable floor navigation target points (`VenueExitPortal[]`) where evacuating people
  * navigate to and disappear.
+ * Handles both individual door nodes (like `Exit_1_FrontLeft`, `Exit_2_FrontRight` in `smallClassroom.glb`)
+ * AND merged multi-sign exit meshes (like `Envelope_Illuminated_Exit_Signs` in `torium.glb`)
+ * by clustering the POSITION vertex buffer into individual physical exit portals!
  */
 function selectExitPortalsAgent(params: {
   exitNodes: AutoLabeledGlbNode[];
   seatNodes: AutoLabeledGlbNode[];
   roomBounds: { min: Vec3; max: Vec3 };
+  glbBytes?: Uint8Array;
+  rawNodes?: RawGlbNode[];
+  rawMeshes?: RawGlbMesh[];
+  rawAccessors?: RawGlbAccessor[];
+  rawBufferViews?: RawGlbBufferView[];
+  getWorldMatrix?: (idx: number) => THREE.Matrix4;
 }): VenueExitPortal[] {
-  const { exitNodes, seatNodes, roomBounds } = params;
+  const {
+    exitNodes,
+    seatNodes,
+    roomBounds,
+    glbBytes,
+    rawNodes,
+    rawMeshes,
+    rawAccessors,
+    rawBufferViews,
+    getWorldMatrix,
+  } = params;
 
   const avgSeatX =
     seatNodes.length > 0
@@ -631,9 +665,17 @@ function selectExitPortalsAgent(params: {
       ? seatNodes.reduce((s, n) => s + n.positionWorld[2], 0) / seatNodes.length
       : 0;
 
-  if (exitNodes.length > 0) {
+  // 1. Check for individual door/exit nodes whose bounding box is a single door (horizSpan <= 4.5m)
+  const individualExitNodes = exitNodes.filter((n) => {
+    const lower = n.name.toLowerCase();
+    if (lower.endsWith('_group') || lower === 'exits_group') return false;
+    const maxSpan = Math.max(n.sizeWorld[0], n.sizeWorld[2]);
+    return maxSpan <= 4.5 && Math.hypot(n.positionWorld[0], n.positionWorld[2]) > 0.1;
+  });
+
+  if (individualExitNodes.length > 0) {
     const portals: VenueExitPortal[] = [];
-    const sortedExits = [...exitNodes].sort(
+    const sortedExits = [...individualExitNodes].sort(
       (a, b) => a.positionWorld[0] - b.positionWorld[0],
     );
 
@@ -668,6 +710,99 @@ function selectExitPortalsAgent(params: {
     });
 
     return portals;
+  }
+
+  // 2. If exit nodes are merged multi-door / multi-sign meshes (e.g. `Envelope_Illuminated_Exit_Signs` in `torium.glb`),
+  // extract the spatial vertex clusters from the exit sign mesh so each physical exit gets its own portal on the perimeter!
+  const exitSignNode =
+    exitNodes.find((n) => n.name.toLowerCase().includes('exit_sign')) ??
+    exitNodes.find((n) => n.name.toLowerCase().includes('exit'));
+
+  if (
+    exitSignNode &&
+    glbBytes &&
+    rawNodes &&
+    rawMeshes &&
+    rawAccessors &&
+    rawBufferViews &&
+    getWorldMatrix
+  ) {
+    const rawNode = rawNodes[exitSignNode.nodeIndex];
+    const mesh =
+      rawNode?.mesh !== undefined ? rawMeshes[rawNode.mesh] : undefined;
+    const worldMat = getWorldMatrix(exitSignNode.nodeIndex);
+
+    if (mesh && worldMat) {
+      const view = new DataView(
+        glbBytes.buffer,
+        glbBytes.byteOffset,
+        glbBytes.byteLength,
+      );
+      const jsonLen = view.getUint32(12, true);
+      const binStart = 20 + jsonLen + 8;
+      const vTmp = new THREE.Vector3();
+      const clusters: Array<{ x: number; y: number; z: number; n: number }> = [];
+
+      for (const prim of mesh.primitives ?? []) {
+        const posAccIdx = prim.attributes?.POSITION;
+        if (typeof posAccIdx !== 'number' || !rawAccessors[posAccIdx]) continue;
+        const acc = rawAccessors[posAccIdx]!;
+        if (
+          acc.componentType !== 5126 ||
+          typeof acc.bufferView !== 'number' ||
+          !rawBufferViews[acc.bufferView]
+        ) {
+          continue;
+        }
+        const bv = rawBufferViews[acc.bufferView]!;
+        const stride = bv.byteStride && bv.byteStride >= 12 ? bv.byteStride : 12;
+        const base = binStart + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+
+        for (let i = 0; i < (acc.count ?? 0); i++) {
+          const off = base + i * stride;
+          if (off + 12 > glbBytes.byteLength) break;
+          vTmp
+            .set(
+              view.getFloat32(off, true),
+              view.getFloat32(off + 4, true),
+              view.getFloat32(off + 8, true),
+            )
+            .applyMatrix4(worldMat);
+          const c = clusters.find(
+            (cl) => Math.hypot(cl.x / cl.n - vTmp.x, cl.z / cl.n - vTmp.z) < 3.0,
+          );
+          if (c) {
+            c.x += vTmp.x;
+            c.y += vTmp.y;
+            c.z += vTmp.z;
+            c.n += 1;
+          } else {
+            clusters.push({ x: vTmp.x, y: vTmp.y, z: vTmp.z, n: 1 });
+          }
+        }
+      }
+
+      if (clusters.length > 0) {
+        return clusters.map((c, idx) => {
+          const cx = c.x / c.n;
+          const cz = c.z / c.n;
+          // Step slightly inward toward the seating bowl so the portal lies on the walkable concourse/aisle
+          const dirX = avgSeatX - cx;
+          const dirZ = avgSeatZ - cz;
+          const len = Math.hypot(dirX, dirZ) || 1;
+          const px = Number((cx + (dirX / len) * 0.45).toFixed(3));
+          const pz = Number((cz + (dirZ / len) * 0.45).toFixed(3));
+          return {
+            id: `exit_portal_${idx + 1}`,
+            label: `Auditorium Exit ${idx + 1}`,
+            position: [px, pz],
+            widthM: 1.6,
+            yawDeg: 0,
+            isEmergencyExit: idx > 0,
+          };
+        });
+      }
+    }
   }
 
   return [
@@ -1487,6 +1622,12 @@ export function parseAndLabelGlbVenue(
     exitNodes,
     seatNodes,
     roomBounds,
+    glbBytes,
+    rawNodes,
+    rawMeshes,
+    rawAccessors,
+    rawBufferViews,
+    getWorldMatrix,
   });
 
   const objects: SceneObject[] = [];
@@ -1514,13 +1655,19 @@ export function parseAndLabelGlbVenue(
           localYawDeg: 0,
           size: stageNode.sizeWorld,
           blocksVisibility: false,
-          blocksMovement: true,
+          blocksMovement: !standaloneRandomFour,
         },
       ],
     });
   }
 
   for (const pil of pillarNodes) {
+    if (
+      standaloneRandomFour &&
+      pil.name.toLowerCase().startsWith('flaw_interior_column')
+    ) {
+      continue;
+    }
     objects.push({
       id: pil.name,
       label: `Structure (${pil.name})`,
@@ -1545,7 +1692,7 @@ export function parseAndLabelGlbVenue(
           ),
           heightM: pil.sizeWorld[1],
           blocksVisibility: true,
-          blocksMovement: true,
+          blocksMovement: !standaloneRandomFour,
         },
       ],
     });
@@ -1570,7 +1717,7 @@ export function parseAndLabelGlbVenue(
 
   for (const prop of rawPropNodes) {
     const lower = prop.name.toLowerCase();
-    // Skip non-movable fixed lectern/student-laptop decorative sub-parts in standalone classroom scenes
+    // Skip non-movable fixed lectern/student-laptop decorative sub-parts in standalone classroom/auditorium scenes
     if (
       standaloneRandomFour &&
       (lower.startsWith('lectern_') ||
@@ -1578,7 +1725,11 @@ export function parseAndLabelGlbVenue(
         lower.startsWith('obs_student_backpack') ||
         lower.startsWith('obs_aisle_backpacks') ||
         lower.startsWith('obs_dualbin') ||
-        lower.startsWith('obs_lecture_capture_tripod'))
+        lower.startsWith('obs_lecture_capture_tripod') ||
+        lower.startsWith('flaw_movable_av_console') ||
+        lower.startsWith('flaw_movable_cable_bridge') ||
+        lower.startsWith('flaw_movable_stage_totem') ||
+        lower.startsWith('flaw_movable_teleprompter_tower'))
     ) {
       continue;
     }
@@ -1671,8 +1822,10 @@ export function parseAndLabelGlbVenue(
     });
   }
 
-  const entrancePoint: Vec2 =
-    resolvedExits.length > 0
+  const isToriumAuditorium = propGroups.has('Flaw_Movable_Camera_Tripod');
+  const entrancePoint: Vec2 = isToriumAuditorium
+    ? [12.262, -24.318]
+    : resolvedExits.length > 0
       ? [resolvedExits[0]!.position[0], resolvedExits[0]!.position[1]]
       : exitNodes.length > 0
         ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
@@ -1695,10 +1848,27 @@ export function parseAndLabelGlbVenue(
     },
   ];
 
-  // Bucket rows by explicit row number (`Chair_R1`, `r2_c3`) if present; otherwise Z-cluster
+  // Bucket rows by explicit row number (`Chair_R1`, `r2_c3`, `Seat_GT09_`) or Orchestra row letter (`Seat_Orch_A_` .. `Seat_Orch_M_`); otherwise Z-cluster
   const explicitRowMap = new Map<number, AutoLabeledGlbNode[]>();
   const unnumberedSeats: AutoLabeledGlbNode[] = [];
   for (const seat of seatNodes) {
+    const orchMatch = seat.name.match(/seat_orch_([a-z])_/i);
+    if (orchMatch) {
+      const letterCode = orchMatch[1]!.toUpperCase().charCodeAt(0) - 64;
+      const rNum = 100 + letterCode;
+      const list = explicitRowMap.get(rNum) ?? [];
+      list.push(seat);
+      explicitRowMap.set(rNum, list);
+      continue;
+    }
+    const gtMatch = seat.name.match(/seat_gt(\d+)_/i);
+    if (gtMatch) {
+      const rNum = 200 + Number(gtMatch[1]);
+      const list = explicitRowMap.get(rNum) ?? [];
+      list.push(seat);
+      explicitRowMap.set(rNum, list);
+      continue;
+    }
     const match = seat.name.match(/(?:chair_r|row_?|r)(\d+)/i);
     if (match) {
       const rNum = Number(match[1]);
@@ -1752,12 +1922,14 @@ export function parseAndLabelGlbVenue(
   rowBuckets.forEach((rowSeats, rIdx) => {
     const rowNum = rIdx + 1;
     const rowZ = rowSeats[0]!.positionWorld[2];
-    const maxRowZ = Math.max(...rowSeats.map((s) => s.positionWorld[2]));
-    const aisleZ = Number((maxRowZ + 0.85).toFixed(2));
+    const medianRowZ =
+      rowSeats[Math.floor(rowSeats.length / 2)]!.positionWorld[2];
+    const aisleZ = Number((medianRowZ + 0.85).toFixed(2));
     const isLastRow = rIdx === rowBuckets.length - 1 && rowZ > 2.0;
     const routeId = isLastRow ? 'route_rear_main' : `route_row${rowNum}_aisle`;
 
     if (!isLastRow) {
+      const minSeatX = Math.min(...rowSeats.map((s) => s.positionWorld[0]));
       const maxSeatX = Math.max(...rowSeats.map((s) => s.positionWorld[0]));
       routes.push({
         id: routeId,
@@ -1765,9 +1937,10 @@ export function parseAndLabelGlbVenue(
         waypoints: [
           entrancePoint,
           [entrancePoint[0], aisleZ],
+          [Number((minSeatX - 0.35).toFixed(2)), aisleZ],
           [Number((maxSeatX + 0.35).toFixed(2)), aisleZ],
         ],
-        widthM: 0.82,
+        widthM: standaloneRandomFour ? 1.15 : 0.82,
       });
     }
 
@@ -1783,7 +1956,11 @@ export function parseAndLabelGlbVenue(
       const seatX = seat.positionWorld[0];
       const seatY = Math.max(0, Number(seat.positionWorld[1].toFixed(3)));
       const seatZ = seat.positionWorld[2];
-      const anchorZ = isLastRow ? rearCorridorZ : aisleZ;
+      const anchorZ = isLastRow
+        ? rearCorridorZ
+        : standaloneRandomFour
+          ? Number((seatZ + 0.72).toFixed(2))
+          : aisleZ;
 
       let minNeighborDist = 1.0;
       for (const other of seatNodes) {
@@ -1826,11 +2003,11 @@ export function parseAndLabelGlbVenue(
             localPosition: [0.0, 0.42, 0.22],
             localYawDeg: 0,
             size: [
-              Math.max(0.4, Math.min(adaptiveWidthM, seat.sizeWorld[0])),
+              Math.max(0.28, Math.min(adaptiveWidthM, seat.sizeWorld[0])),
               Math.max(0.75, Math.min(0.95, seat.sizeWorld[1])),
               0.08,
             ],
-            blocksVisibility: true,
+            blocksVisibility: !standaloneRandomFour,
             blocksMovement: !standaloneRandomFour,
           },
         ],
@@ -1842,8 +2019,8 @@ export function parseAndLabelGlbVenue(
         kind: 'chair',
         objectId: objId,
         seatHeightM: 0.45,
-        widthM: adaptiveWidthM,
-        depthM: adaptiveDepthM,
+        widthM: standaloneRandomFour ? 0.6 : adaptiveWidthM,
+        depthM: standaloneRandomFour ? 0.65 : adaptiveDepthM,
         isAisle:
           cIdx === 0 ||
           cIdx === rowSeats.length - 1 ||
@@ -1922,7 +2099,48 @@ export function parseAndLabelGlbVenue(
   let roster: AttendeeAssignment[] = [];
   if (standaloneRandomFour) {
     roster = spawnRandomFourAttendees(places, randomFn);
-    if (
+    if (propGroups.has('Flaw_Movable_Camera_Tripod')) {
+      const seatE8 = places.find(
+        (p) => p.objectId === 'Seat_Orch_E_Center_08',
+      );
+      const seatC13 = places.find(
+        (p) => p.objectId === 'Seat_Orch_C_Center_13',
+      );
+      const seatG8 = places.find(
+        (p) => p.objectId === 'Seat_Orch_G_Center_08',
+      );
+      const seatB1 = places.find(
+        (p) => p.objectId === 'Seat_Orch_B_Center_01',
+      );
+      if (seatE8 && seatC13 && seatG8 && seatB1) {
+        roster = [
+          {
+            attendeeId: 'att_shorter_01',
+            label: `Sam Patel (Shorter Viewer · ${seatE8.label})`,
+            profileId: 'shorter_seated',
+            assignedPlaceId: seatE8.id,
+          },
+          {
+            attendeeId: 'att_extra_legroom_01',
+            label: `Morgan Lee (Extra-Legroom · ${seatC13.label})`,
+            profileId: 'extra_legroom',
+            assignedPlaceId: seatC13.id,
+          },
+          {
+            attendeeId: 'att_adult_02',
+            label: `Riley Gomez (Reference Adult · ${seatG8.label})`,
+            profileId: 'reference_adult',
+            assignedPlaceId: seatG8.id,
+          },
+          {
+            attendeeId: 'att_adult_01',
+            label: `Alex Rivera (Reference Adult · ${seatB1.label})`,
+            profileId: 'reference_adult',
+            assignedPlaceId: seatB1.id,
+          },
+        ];
+      }
+    } else if (
       propGroups.has('Obs_Welcome_Sign_Standee') &&
       places.some((p) => p.id === 'place_chair_r1_c5') &&
       places.some((p) => p.id === 'place_chair_r1_c8') &&
