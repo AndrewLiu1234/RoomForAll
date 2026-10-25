@@ -1039,13 +1039,17 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
         'Evacuation Impossible',
       );
 
-      // Run repairer: should add new reachable exits so trappedCount drops to 0 and all 4 people exit without phasing through walls
+      // Run repairer: with 4 existing exits in torium.glb, it should MOVE existing exits to minimize escape time
+      // so everyone escapes (trappedCount === 0) WITHOUT adding unnecessary new exits (totalExitCount remains 4)!
       const repairedRun = createLocalFixtureRepairPreviewRun(
         torReport.snapshot,
       );
       expect(
         repairedRun.attempts[0]?.patch.addedExits?.length,
       ).toBeGreaterThan(0);
+      expect(repairedRun.bestSnapshot.exits?.length).toBe(
+        torReport.snapshot.exits?.length,
+      );
       const repairedEvac = simulateEvacuation(
         repairedRun.bestSnapshot,
         'emergency_evacuation',
@@ -1055,6 +1059,25 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
         repairedEvac.frames[repairedEvac.frames.length - 1]!;
       expect(
         Object.values(repFinalFrame.agents).every((a) => a.state === 'exited'),
+      ).toBe(true);
+
+      // And if only 1 existing exit exists across multiple disconnected tiers, the repairer moves that 1 exit
+      // AND adds only the strictly necessary new exits so everyone escapes
+      const singleExitSnap = {
+        ...torReport.snapshot,
+        exits: [torReport.snapshot.exits![0]!],
+      };
+      const singleExitRepair =
+        createLocalFixtureRepairPreviewRun(singleExitSnap);
+      const singleExitEvac = simulateEvacuation(
+        singleExitRepair.bestSnapshot,
+        'emergency_evacuation',
+      );
+      expect(singleExitEvac.trappedCount).toBe(0);
+      expect(
+        singleExitRepair.bestSnapshot.exits!.some((e) =>
+          e.id.startsWith('exit_repaired_'),
+        ),
       ).toBe(true);
     }
 

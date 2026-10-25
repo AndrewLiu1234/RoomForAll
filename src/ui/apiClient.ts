@@ -265,18 +265,24 @@ export function createLocalFixtureRepairPreviewRun(
   // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues:
   // Repairs the scene ONLY by shifting chairs (movable_chair / chairGroups), walkways (updatedRoutes), and exits (addedExits).
   if (!hasDevSign) {
-    const candidateChairDeltas: Array<[number, number, number]> = [
-      [-0.55, 0, 0],
-      [0.55, 0, 0],
-      [0, 0, 0.45],
-      [0, 0, -0.45],
-      [-0.55, 0, 0.45],
-      [0.55, 0, 0.45],
-      [-0.55, 0, -0.45],
-      [0.55, 0, -0.45],
-      [-0.35, 0, 0.35],
-      [0.35, 0, 0.35],
-    ];
+    const candidateChairDeltas: Array<[number, number, number]> =
+      baselineSnapshot.places.length > 200
+        ? [
+            [-0.55, 0, 0],
+            [0.55, 0, 0],
+          ]
+        : [
+            [-0.55, 0, 0],
+            [0.55, 0, 0],
+            [0, 0, 0.45],
+            [0, 0, -0.45],
+            [-0.55, 0, 0.45],
+            [0.55, 0, 0.45],
+            [-0.55, 0, -0.45],
+            [0.55, 0, -0.45],
+            [-0.35, 0, 0.35],
+            [0.35, 0, 0.35],
+          ];
 
     const ops: LayoutPatch['operations'] = [];
     let currentSnap = baselineSnapshot;
@@ -285,12 +291,23 @@ export function createLocalFixtureRepairPreviewRun(
     const isStandaloneGlb =
       baselineSnapshot.sceneId.startsWith('glb_standalone_');
 
-    // 1. Shift / add reachable exits (`addedExits`) first if any attendees are blocked by walls or isolated levels
+    // 1. Move existing exits to minimize escape time & ensure everyone can escape, adding new exits ONLY when strictly necessary
     const addedExits = synthesizeReachableExitsForSnapshot(currentSnap);
     if (addedExits.length > 0) {
+      const mergedExits = currentSnap.exits ? [...currentSnap.exits] : [];
+      const idxById = new Map(mergedExits.map((e, i) => [e.id, i]));
+      for (const upExit of addedExits) {
+        const existingIdx = idxById.get(upExit.id);
+        if (existingIdx !== undefined) {
+          mergedExits[existingIdx] = structuredClone(upExit);
+        } else {
+          idxById.set(upExit.id, mergedExits.length);
+          mergedExits.push(structuredClone(upExit));
+        }
+      }
       currentSnap = withUpdatedSceneHash({
         ...currentSnap,
-        exits: [...(currentSnap.exits ?? []), ...addedExits],
+        exits: mergedExits,
       });
       currentEval = evaluateSceneWithFallback(currentSnap);
     }
@@ -427,9 +444,21 @@ export function createLocalFixtureRepairPreviewRun(
       );
     }
     if (addedExits.length > 0) {
-      summaryParts.push(
-        `Added ${addedExits.length} reachable exit(s) (${addedExits.map((e) => `${e.label} at [${e.position[0].toFixed(1)}, ${(e.elevationM ?? 0).toFixed(1)}, ${e.position[1].toFixed(1)}]m`).join('; ')})`,
+      const baselineExitIds = new Set(
+        (baselineSnapshot.exits ?? []).map((e) => e.id),
       );
+      const movedExits = addedExits.filter((e) => baselineExitIds.has(e.id));
+      const newExits = addedExits.filter((e) => !baselineExitIds.has(e.id));
+      if (movedExits.length > 0) {
+        summaryParts.push(
+          `Moved ${movedExits.length} existing exit(s) to minimize escape time (${movedExits.map((e) => `${e.id} -> [${e.position[0].toFixed(1)}, ${(e.elevationM ?? 0).toFixed(1)}, ${e.position[1].toFixed(1)}]m`).join('; ')})`,
+        );
+      }
+      if (newExits.length > 0) {
+        summaryParts.push(
+          `Added ${newExits.length} strictly necessary exit(s) (${newExits.map((e) => `${e.label} at [${e.position[0].toFixed(1)}, ${(e.elevationM ?? 0).toFixed(1)}, ${e.position[1].toFixed(1)}]m`).join('; ')})`,
+        );
+      }
     }
 
     const combinedPatch: LayoutPatch = {

@@ -672,12 +672,21 @@ function buildAgentEgressWaypoints(
 }
 
 /**
- * Synthesizes new reachable `VenueExitPortal`s for any attendees (or seating tiers)
- * that cannot reach an existing exit without phasing through walls, parapets, or elevation drops.
+ * Optimizes exit portals for `snapshot` by:
+ * 1. Clustering all occupied people (`snapshot.roster`) into the MINIMUM number of mutually-reachable
+ *    walled/elevation zones, choosing for each zone the unobstructed aisle position that MINIMIZES escape time.
+ * 2. Moving existing exits (`snapshot.exits`) FIRST to cover those zones and minimize escape time (preserving
+ *    existing exit IDs so `totalExitCount` does not increase unless necessary).
+ * 3. Adding new exits (`exit_repaired_*`) ONLY when strictly necessary (when there are more mutually
+ *    disconnected walled/elevation zones of people than existing exits).
  */
 export function synthesizeReachableExitsForSnapshot(
   snapshot: SceneSnapshot,
 ): VenueExitPortal[] {
+  if (snapshot.roster.length === 0) {
+    return [];
+  }
+
   const placeByObjectId = new Map(snapshot.places.map((p) => [p.objectId, p]));
   const placeById = new Map(snapshot.places.map((p) => [p.id, p]));
   const objectById = new Map(snapshot.objects.map((o) => [o.id, o]));
@@ -695,137 +704,291 @@ export function synthesizeReachableExitsForSnapshot(
   }
 
   const wallBlockers = getWallAndBarrierColliders(snapshot, movementBlockers);
-  const workingExits: VenueExitPortal[] = snapshot.exits
+  const existingExits: VenueExitPortal[] = snapshot.exits
     ? structuredClone(snapshot.exits)
     : [];
-  const addedExits: VenueExitPortal[] = [];
 
-  // Inspect all occupied seats first, plus representative seats from each elevation tier
-  const candidatePlaces: AudiencePlace[] = [];
+  interface OccupiedSeatInfo {
+    attendeeId: string;
+    place: AudiencePlace;
+    seatPos: Vec2;
+    seatY: number;
+    baselineTrapped: boolean;
+    baselinePathLengthM: number;
+  }
+
+  const resolvedBaselineExits = resolveActiveExitPortals(
+    snapshot,
+    movementBlockers,
+  );
+  const occupiedSeats: OccupiedSeatInfo[] = [];
+
   for (const member of snapshot.roster) {
-    const p = placeById.get(member.assignedPlaceId);
-    if (p) candidatePlaces.push(p);
-  }
-  const seenTierKeys = new Set<string>();
-  for (const p of snapshot.places) {
-    const obj = objectById.get(p.objectId);
-    if (!obj) continue;
-    const tierKey = `${Math.round(obj.transform.position[1])}:${Math.round(obj.transform.position[2] / 6)}`;
-    if (!seenTierKeys.has(tierKey)) {
-      seenTierKeys.add(tierKey);
-      candidatePlaces.push(p);
-    }
-  }
-
-  for (const place of candidatePlaces) {
-    const obj = objectById.get(place.objectId);
-    if (!obj) continue;
+    const place = placeById.get(member.assignedPlaceId);
+    const obj = place ? objectById.get(place.objectId) : undefined;
+    if (!place || !obj) continue;
     const seatPos: Vec2 = [
       obj.transform.position[0],
       obj.transform.position[2],
     ];
     const seatY = obj.transform.position[1];
-
-    const resolvedCurrent = resolveActiveExitPortals(
-      { ...snapshot, exits: workingExits },
-      movementBlockers,
-    );
-    const check = buildAgentEgressWaypoints(
+    const baseCheck = buildAgentEgressWaypoints(
       seatPos,
       seatY,
       place,
-      { ...snapshot, exits: workingExits },
-      resolvedCurrent,
+      snapshot,
+      resolvedBaselineExits,
       wallBlockers,
     );
+    const basePathLen = baseCheck.trappedByWall
+      ? Infinity
+      : computeWaypointChainLength(seatPos, baseCheck.waypoints);
+    occupiedSeats.push({
+      attendeeId: member.attendeeId,
+      place,
+      seatPos,
+      seatY,
+      baselineTrapped: baseCheck.trappedByWall,
+      baselinePathLengthM: basePathLen,
+    });
+  }
 
-    const lastWp =
-      check.waypoints[check.waypoints.length - 1] ?? seatPos;
-    const distToExit = Math.hypot(
-      lastWp[0] - seatPos[0],
-      lastWp[1] - seatPos[1],
-    );
-    if (!check.trappedByWall && distToExit <= 6.0) {
-      continue;
-    }
+  if (occupiedSeats.length === 0) {
+    return [];
+  }
 
-    // Place the new reachable exit in the clear row/aisle corridor (stepped 0.32m out into the row cross-aisle and laterally toward the nearest side aisle)
-    const aisleZ = Number((seatPos[1] - 0.32).toFixed(2));
-    const candidateDirs: Array<-1 | 1> =
-      seatPos[0] <= 0 ? [-1, 1] : [1, -1];
-    let chosenExitPos: Vec2 = [
-      Number((seatPos[0] + 1.4).toFixed(2)),
-      aisleZ,
-    ];
-    let chosenDir: -1 | 1 = candidateDirs[0]!;
-    let bestClearDist = -1;
+  // Generate candidate unobstructed aisle exit portals across all occupied seats (plus midpoints on the same tier)
+  interface CandidatePortal {
+    position: Vec2;
+    elevationM: number;
+    yawDeg: number;
+  }
+  const candidates: CandidatePortal[] = [];
 
-    for (const dSign of candidateDirs) {
+  // Include current existing exits as candidates too
+  for (const ex of existingExits) {
+    candidates.push({
+      position: [ex.position[0], ex.position[1]],
+      elevationM: ex.elevationM ?? 0,
+      yawDeg: ex.yawDeg,
+    });
+  }
+
+  const offsetsX = [-2.2, -1.5, -0.9, 0.9, 1.5, 2.2];
+  for (const info of occupiedSeats) {
+    const aisleZ = Number((info.seatPos[1] - 0.32).toFixed(2));
+    for (const dx of offsetsX) {
+      const dSign: -1 | 1 = dx < 0 ? -1 : 1;
       const targetX =
         dSign < 0
-          ? Math.max(snapshot.roomBounds.min[0] + 1.2, seatPos[0] - 2.0)
-          : Math.min(snapshot.roomBounds.max[0] - 1.2, seatPos[0] + 2.0);
-
+          ? Math.max(snapshot.roomBounds.min[0] + 1.0, info.seatPos[0] + dx)
+          : Math.min(snapshot.roomBounds.max[0] - 1.0, info.seatPos[0] + dx);
       const hit = findFirstWallHitOnSegment(
-        [seatPos[0], aisleZ],
+        [info.seatPos[0], aisleZ],
         [targetX, aisleZ],
-        seatY,
+        info.seatY,
         wallBlockers,
-        place.objectId,
+        info.place.objectId,
       );
-
-      const candidatePt: Vec2 = hit.blocked
-        ? [
-            Number((hit.stopPoint[0] - dSign * 0.25).toFixed(2)),
-            aisleZ,
-          ]
+      const pt: Vec2 = hit.blocked
+        ? [Number((hit.stopPoint[0] - dSign * 0.25).toFixed(2)), aisleZ]
         : [Number(targetX.toFixed(2)), aisleZ];
+      candidates.push({
+        position: pt,
+        elevationM: Number(info.seatY.toFixed(2)),
+        yawDeg: dSign < 0 ? 90 : -90,
+      });
+    }
+  }
 
-      const verify = checkWaypointChainWallFree(
-        seatPos,
-        [[seatPos[0], aisleZ], candidatePt],
-        seatY,
-        wallBlockers,
-        place.objectId,
-      );
-      const dist = Math.hypot(
-        candidatePt[0] - seatPos[0],
-        candidatePt[1] - seatPos[1],
-      );
-      if (verify.clear && dist > bestClearDist) {
-        bestClearDist = dist;
-        chosenExitPos = candidatePt;
-        chosenDir = dSign;
+  // Also add midpoints between pairs of occupied seats on the same tier so a single moved exit can serve multiple people
+  for (let i = 0; i < occupiedSeats.length; i++) {
+    for (let j = i + 1; j < occupiedSeats.length; j++) {
+      const a = occupiedSeats[i]!;
+      const b = occupiedSeats[j]!;
+      if (Math.abs(a.seatY - b.seatY) <= 0.9) {
+        const midX = Number(((a.seatPos[0] + b.seatPos[0]) * 0.5).toFixed(2));
+        const midZ = Number(
+          ((a.seatPos[1] + b.seatPos[1]) * 0.5 - 0.32).toFixed(2),
+        );
+        const avgY = Number(((a.seatY + b.seatY) * 0.5).toFixed(2));
+        candidates.push({
+          position: [midX, midZ],
+          elevationM: avgY,
+          yawDeg: midX <= 0 ? 90 : -90,
+        });
+      }
+    }
+  }
+
+  // Greedy minimum-cluster set cover with escape-time minimization:
+  // Find the minimum number of exit positions needed so EVERY person can escape,
+  // choosing positions that minimize walkable escape time.
+  const uncoveredIndices = new Set<number>(occupiedSeats.map((_, idx) => idx));
+  const requiredClusters: Array<{
+    memberIndices: number[];
+    portal: CandidatePortal;
+    maxPathLengthM: number;
+  }> = [];
+
+  while (uncoveredIndices.size > 0) {
+    let bestChoice: {
+      memberIndices: number[];
+      portal: CandidatePortal;
+      maxPathLengthM: number;
+      score: number;
+    } | null = null;
+
+    for (let cIdx = 0; cIdx < candidates.length; cIdx++) {
+      const cand = candidates[cIdx]!;
+      const testPortal: ResolvedExitPortal = {
+        id: `cand_${cIdx}`,
+        label: `Candidate ${cIdx}`,
+        position: cand.position,
+        elevationM: cand.elevationM,
+        widthM: 1.4,
+        yawDeg: cand.yawDeg,
+        isEmergencyExit: true,
+        effectiveWidthM: 1.4,
+        isBlocked: false,
+        blockingObjectIds: [],
+      };
+
+      const covered: number[] = [];
+      let maxPath = 0;
+      let sumPath = 0;
+
+      for (const sIdx of uncoveredIndices) {
+        const seat = occupiedSeats[sIdx]!;
+        const check = buildAgentEgressWaypoints(
+          seat.seatPos,
+          seat.seatY,
+          seat.place,
+          { ...snapshot, exits: [testPortal] },
+          [testPortal],
+          wallBlockers,
+        );
+        if (!check.trappedByWall) {
+          const pLen = computeWaypointChainLength(
+            seat.seatPos,
+            check.waypoints,
+          );
+          if (pLen <= 9.5) {
+            covered.push(sIdx);
+            if (pLen > maxPath) maxPath = pLen;
+            sumPath += pLen;
+          }
+        }
+      }
+
+      if (covered.length === 0) continue;
+      const avgPath = sumPath / covered.length;
+      // Primary: maximize number of uncovered people rescued by this single exit (minimizing total exits needed!)
+      // Secondary: minimize maxPath + 0.25 * avgPath (minimizing escape time!)
+      const score = covered.length * 1000 - (maxPath + 0.25 * avgPath);
+      if (!bestChoice || score > bestChoice.score) {
+        bestChoice = {
+          memberIndices: covered,
+          portal: cand,
+          maxPathLengthM: maxPath,
+          score,
+        };
       }
     }
 
-    const exitPos: Vec2 = chosenExitPos;
-    const dirSign = chosenDir;
+    if (!bestChoice) {
+      // Fallback for any remaining seat: place directly at its row step
+      const firstRemainingIdx = Array.from(uncoveredIndices)[0]!;
+      const seat = occupiedSeats[firstRemainingIdx]!;
+      bestChoice = {
+        memberIndices: [firstRemainingIdx],
+        portal: {
+          position: [
+            Number(seat.seatPos[0].toFixed(2)),
+            Number((seat.seatPos[1] - 0.32).toFixed(2)),
+          ],
+          elevationM: Number(seat.seatY.toFixed(2)),
+          yawDeg: seat.seatPos[0] <= 0 ? 90 : -90,
+        },
+        maxPathLengthM: 0.32,
+        score: 0,
+      };
+    }
 
-    // Avoid duplicate exits within 2.2m on the same elevation tier so nearby people share the same reasonable aisle exit
-    const alreadyExists = workingExits.some(
-      (e) =>
-        Math.hypot(e.position[0] - exitPos[0], e.position[1] - exitPos[1]) <
-          2.2 && Math.abs((e.elevationM ?? 0) - seatY) <= 0.85,
-    );
-    if (alreadyExists) continue;
-
-    const exitIdx = addedExits.length + 1;
-    const newPortal: VenueExitPortal = {
-      id: `exit_repaired_${exitIdx}`,
-      label: `Added Aisle Exit ${exitIdx} (Tier Y=${seatY.toFixed(1)}m)`,
-      position: exitPos,
-      elevationM: Number(seatY.toFixed(2)),
-      widthM: 1.4,
-      yawDeg: dirSign < 0 ? 90 : -90,
-      isEmergencyExit: true,
-    };
-
-    workingExits.push(newPortal);
-    addedExits.push(newPortal);
+    requiredClusters.push({
+      memberIndices: bestChoice.memberIndices,
+      portal: bestChoice.portal,
+      maxPathLengthM: bestChoice.maxPathLengthM,
+    });
+    for (const sIdx of bestChoice.memberIndices) {
+      uncoveredIndices.delete(sIdx);
+    }
   }
 
-  return addedExits;
+  // Assign clusters to EXISTING exits first (moving existing exits to minimize escape time!),
+  // and ONLY add new exits if `requiredClusters.length > existingExits.length` (strictly when necessary!).
+  const usedExistingIndices = new Set<number>();
+  const modifiedOrAddedExits: VenueExitPortal[] = [];
+  let addedNewCount = 0;
+
+  for (const cluster of requiredClusters) {
+    const clusterWasTrapped = cluster.memberIndices.some(
+      (i) => occupiedSeats[i]!.baselineTrapped,
+    );
+    const baselineMaxPath = Math.max(
+      ...cluster.memberIndices.map(
+        (i) => occupiedSeats[i]!.baselinePathLengthM,
+      ),
+    );
+
+    // Find closest unused existing exit
+    let bestExistingIdx = -1;
+    let bestExistingDist = Infinity;
+    for (let eIdx = 0; eIdx < existingExits.length; eIdx++) {
+      if (usedExistingIndices.has(eIdx)) continue;
+      const ex = existingExits[eIdx]!;
+      const d = Math.hypot(
+        ex.position[0] - cluster.portal.position[0],
+        ex.position[1] - cluster.portal.position[1],
+      );
+      if (d < bestExistingDist) {
+        bestExistingDist = d;
+        bestExistingIdx = eIdx;
+      }
+    }
+
+    if (bestExistingIdx >= 0) {
+      usedExistingIndices.add(bestExistingIdx);
+      const ex = existingExits[bestExistingIdx]!;
+      // Move this existing exit if it rescues trapped people OR shortens escape path by >= 0.35m
+      if (
+        clusterWasTrapped ||
+        cluster.maxPathLengthM < baselineMaxPath - 0.35
+      ) {
+        modifiedOrAddedExits.push({
+          ...ex,
+          position: cluster.portal.position,
+          elevationM: cluster.portal.elevationM,
+          yawDeg: cluster.portal.yawDeg,
+        });
+      }
+    } else {
+      // All existing exits have already been assigned to other mutually disconnected zones:
+      // Adding a new exit is ABSOLUTELY NECESSARY so this isolated cluster can escape!
+      addedNewCount += 1;
+      modifiedOrAddedExits.push({
+        id: `exit_repaired_${addedNewCount}`,
+        label: `Added Emergency Exit ${addedNewCount} (Tier Y=${cluster.portal.elevationM.toFixed(1)}m)`,
+        position: cluster.portal.position,
+        elevationM: cluster.portal.elevationM,
+        widthM: 1.4,
+        yawDeg: cluster.portal.yawDeg,
+        isEmergencyExit: true,
+      });
+    }
+  }
+
+  return modifiedOrAddedExits;
 }
 
 /**
