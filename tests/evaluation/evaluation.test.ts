@@ -671,4 +671,40 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       ).toBe(true);
     });
   });
+
+  describe('8. Emergency Evacuation & Bunched Row Repair', () => {
+    it('detects row bunching and blocked emergency exit in createBunchedEmergencyVenueSnapshot and repairs via createBunchedEmergencyReferencePatch', async () => {
+      const {
+        createBunchedEmergencyVenueSnapshot,
+        createBunchedEmergencyReferencePatch,
+      } = await import('../../src/scene/index.js');
+
+      const baseSnap = createBunchedEmergencyVenueSnapshot();
+      const baseEval = evaluateScene(baseSnap);
+
+      expect(baseEval.isValidStructure).toBe(true);
+      expect(baseEval.evacuation).toBeDefined();
+      expect(baseEval.evacuation!.activeExitCount).toBe(1);
+      expect(baseEval.evacuation!.totalExitCount).toBe(2);
+      expect(baseEval.evacuation!.jammedAttendeeIds.length).toBeGreaterThan(0);
+
+      const patch = createBunchedEmergencyReferencePatch(
+        'run_bunched_24',
+        baseSnap.sceneHash,
+      );
+      const validated = applyAndValidatePatch(baseSnap, baseSnap, patch);
+      expect(validated.valid).toBe(true);
+      expect(validated.snapshot).toBeDefined();
+
+      const candEval = evaluateScene(validated.snapshot!);
+      expect(candEval.evacuation!.activeExitCount).toBe(2);
+      expect(candEval.evacuation!.jammedAttendeeIds).toHaveLength(0);
+      expect(candEval.evacuation!.totalEvacuationTimeSec).toBeLessThan(
+        baseEval.evacuation!.totalEvacuationTimeSec,
+      );
+
+      const cmp = compareEvaluations(baseEval, candEval);
+      expect(cmp.accepted).toBe(true);
+    });
+  });
 });

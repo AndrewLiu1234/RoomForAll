@@ -882,6 +882,74 @@ export function ComparisonPanel({
             </div>
           </div>
 
+          {baseEval.evacuation && bestEval.evacuation && (
+            <>
+              <div className="vp-metric-row">
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  Emergency Evac Time
+                </span>
+                <div
+                  className="mono"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <span>
+                    {baseEval.evacuation.totalEvacuationTimeSec.toFixed(1)}s
+                  </span>
+                  {hasRevision && (
+                    <>
+                      <span style={{ color: 'var(--text-muted)' }}>→</span>
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          color:
+                            bestEval.evacuation.totalEvacuationTimeSec <
+                            baseEval.evacuation.totalEvacuationTimeSec
+                              ? 'var(--status-pass-text)'
+                              : 'var(--text-primary)',
+                        }}
+                      >
+                        {bestEval.evacuation.totalEvacuationTimeSec.toFixed(1)}s
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="vp-metric-row">
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  Active Emergency Exits
+                </span>
+                <div
+                  className="mono"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <span>
+                    {baseEval.evacuation.activeExitCount}/
+                    {baseEval.evacuation.totalExitCount}
+                  </span>
+                  {hasRevision && (
+                    <>
+                      <span style={{ color: 'var(--text-muted)' }}>→</span>
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          color:
+                            bestEval.evacuation.activeExitCount >
+                            baseEval.evacuation.activeExitCount
+                              ? 'var(--status-pass-text)'
+                              : 'var(--text-primary)',
+                        }}
+                      >
+                        {bestEval.evacuation.activeExitCount}/
+                        {bestEval.evacuation.totalExitCount}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
           {selectedBaselineAtt && selectedBestAtt && (
             <div className="vp-metric-row">
               <span style={{ color: 'var(--text-secondary)' }}>

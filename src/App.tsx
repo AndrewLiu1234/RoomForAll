@@ -9,7 +9,10 @@ import {
   type RunRecord,
   type SceneSnapshot,
 } from './shared/index.js';
-import { createPreparedVenueSnapshot } from './scene/index.js';
+import {
+  createBunchedEmergencyVenueSnapshot,
+  createPreparedVenueSnapshot,
+} from './scene/index.js';
 import {
   ComparisonPanel,
   ProfileEditorModal,
@@ -26,9 +29,9 @@ import {
 } from './ui/index.js';
 
 export function App(): React.ReactElement {
-  const [venuePreset, setVenuePreset] = useState<'prepared_24' | 'dev_4'>(
-    'prepared_24',
-  );
+  const [venuePreset, setVenuePreset] = useState<
+    'prepared_24' | 'bunched_emergency_24' | 'dev_4'
+  >('prepared_24');
   const initialSnapshot = useMemo(() => createPreparedVenueSnapshot(), []);
   const [baselineSnapshot, setBaselineSnapshot] =
     useState<SceneSnapshot>(initialSnapshot);
@@ -282,12 +285,16 @@ export function App(): React.ReactElement {
     }
   };
 
-  const handleSelectVenuePreset = (preset: 'prepared_24' | 'dev_4'): void => {
+  const handleSelectVenuePreset = (
+    preset: 'prepared_24' | 'bunched_emergency_24' | 'dev_4',
+  ): void => {
     if (activeRun && activeRun.state !== 'finished') return;
     const nextSnap =
       preset === 'prepared_24'
         ? createPreparedVenueSnapshot()
-        : createDevFixtureSnapshot();
+        : preset === 'bunched_emergency_24'
+          ? createBunchedEmergencyVenueSnapshot()
+          : createDevFixtureSnapshot();
     setVenuePreset(preset);
     setBaselineSnapshot(nextSnap);
     setBaselineEvaluation(evaluateSceneWithFallback(nextSnap));

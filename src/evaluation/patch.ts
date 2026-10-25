@@ -616,6 +616,34 @@ export function compareEvaluations(
     };
   }
 
+  // Priority 5: Emergency Evacuation Time (lower totalEvacuationTimeSec or more activeExits wins)
+  if (baselineEval.evacuation && candidateEval.evacuation) {
+    if (
+      candidateEval.evacuation.totalEvacuationTimeSec + 0.05 <
+      baselineEval.evacuation.totalEvacuationTimeSec
+    ) {
+      return {
+        accepted: true,
+        outcome: 'accepted',
+        reasons: [
+          `Reduced emergency evacuation time from ${baselineEval.evacuation.totalEvacuationTimeSec.toFixed(1)}s to ${candidateEval.evacuation.totalEvacuationTimeSec.toFixed(1)}s.`,
+        ],
+      };
+    }
+    if (
+      candidateEval.evacuation.activeExitCount >
+      baselineEval.evacuation.activeExitCount
+    ) {
+      return {
+        accepted: true,
+        outcome: 'accepted',
+        reasons: [
+          `Increased active emergency exits from ${baselineEval.evacuation.activeExitCount} to ${candidateEval.evacuation.activeExitCount}.`,
+        ],
+      };
+    }
+  }
+
   // Tied on all four priorities: preserve current best
   return {
     accepted: false,

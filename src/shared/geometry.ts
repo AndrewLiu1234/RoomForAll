@@ -224,6 +224,7 @@ export function createBlindCritiquePayload(
     chairGroups: structuredClone(snapshot.chairGroups),
     places: structuredClone(snapshot.places),
     routes: structuredClone(snapshot.routes),
+    ...(snapshot.exits ? { exits: structuredClone(snapshot.exits) } : {}),
     target: structuredClone(snapshot.target),
     patchConstraints: PATCH_CONSTRAINTS,
   };

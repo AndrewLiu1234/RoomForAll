@@ -4,8 +4,13 @@ import {
   INSPECTION_CAMERA,
   getAttendeeCameraPose,
   type Evaluation,
+  type EvacuationMode,
 } from '../shared/index.js';
-import type { VenueViewportProps } from '../scene/index.js';
+import { simulateEvacuation } from '../evaluation/index.js';
+import {
+  updateSceneEvacuationStep,
+  type VenueViewportProps,
+} from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
 import { computeAttendeeSampleVisibilityMask } from './localEvaluatorFallback.js';
 
@@ -46,7 +51,22 @@ export function VenueViewportStage({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const attendeeProxyNodesRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const defaultDistance = snapshot.places.length > 8 ? 10.6 : 7.2;
+
+  const [evacMode, setEvacMode] = useState<EvacuationMode>('none');
+  const [evacTimeSec, setEvacTimeSec] = useState<number>(0);
+  const [isPlayingEvac, setIsPlayingEvac] = useState<boolean>(false);
+  const [evacCounts, setEvacCounts] = useState<{
+    exitedCount: number;
+    queuingCount: number;
+    activeCount: number;
+  }>({ exitedCount: 0, queuingCount: 0, activeCount: snapshot.roster.length });
+
+  const evacSimResult = useMemo(() => {
+    if (evacMode === 'none') return null;
+    return simulateEvacuation(snapshot, evacMode);
+  }, [snapshot, evacMode]);
 
   const [orbitAngles, setOrbitAngles] = useState<{
     azimuthRad: number;
@@ -151,6 +171,14 @@ export function VenueViewportStage({
         viewMode === 'attendee_pov' ? selectedAttendeeId : undefined,
       forBlindEvidenceCapture: false,
     });
+
+    const proxyMap = new Map<string, THREE.Object3D>();
+    scene.traverse((child) => {
+      if (child.name.startsWith('proxy_attendee_torso_') && child.userData?.ownerAttendeeId) {
+        proxyMap.set(child.userData.ownerAttendeeId as string, child);
+      }
+    });
+    attendeeProxyNodesRef.current = proxyMap;
 
     // Add route polylines and dynamic final-approach segments in overview mode
     if (viewMode === 'overview') {
@@ -433,6 +461,56 @@ export function VenueViewportStage({
     renderer.render(scene, camera);
   }, [orbitAngles, viewMode]);
 
+  // Apply evacuation step whenever evacTimeSec or evacSimResult changes
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !scene || !camera) return;
+
+    const counts = updateSceneEvacuationStep(
+      attendeeProxyNodesRef.current,
+      evacSimResult,
+      evacTimeSec,
+    );
+    setEvacCounts(counts);
+    renderer.render(scene, camera);
+  }, [evacSimResult, evacTimeSec, snapshot]);
+
+  // RequestAnimationFrame playback loop for evacuation simulation
+  useEffect(() => {
+    if (!isPlayingEvac || !evacSimResult) return;
+    let rafId = 0;
+    let lastTs = performance.now();
+
+    const tick = (now: number) => {
+      const dtSec = Math.min(0.1, (now - lastTs) / 1000);
+      lastTs = now;
+
+      setEvacTimeSec((prev) => {
+        const next = prev + dtSec;
+        if (next >= evacSimResult.totalEvacuationTimeSec + 0.4) {
+          setIsPlayingEvac(false);
+          return evacSimResult.totalEvacuationTimeSec;
+        }
+        return next;
+      });
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlayingEvac, evacSimResult]);
+
+  const handleSelectEvacMode = (nextMode: EvacuationMode): void => {
+    if (nextMode !== 'none' && viewMode === 'attendee_pov') {
+      onToggleViewMode('overview');
+    }
+    setEvacMode(nextMode);
+    setEvacTimeSec(0);
+    setIsPlayingEvac(nextMode !== 'none');
+  };
+
   const visPct = selectedEval
     ? Math.round(selectedEval.sampledVisibility * 100)
     : 100;
@@ -553,6 +631,54 @@ export function VenueViewportStage({
             />
             <span>Sightline Rays</span>
           </button>
+
+          <div className="vp-divider-v" />
+
+          {/* Egress & Emergency Evacuation Simulation Switcher */}
+          <div
+            className="vp-segmented"
+            style={{ border: 'none', background: 'transparent', padding: 0 }}
+            role="group"
+            aria-label="Evacuation simulation mode"
+          >
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                evacMode === 'none' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSelectEvacMode('none')}
+            >
+              Seated
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                evacMode === 'normal_egress' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSelectEvacMode('normal_egress')}
+            >
+              Normal Exit
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                evacMode === 'emergency_evacuation'
+                  ? 'vp-segment-btn-active'
+                  : ''
+              }`}
+              style={
+                evacMode === 'emergency_evacuation'
+                  ? {
+                      color: 'var(--status-warn-text)',
+                      background: 'var(--status-warn-bg)',
+                    }
+                  : undefined
+              }
+              onClick={() => handleSelectEvacMode('emergency_evacuation')}
+            >
+              Emergency Evac
+            </button>
+          </div>
         </div>
 
         {/* Right: Quick Camera Presets / Next Issue Jump */}
@@ -614,6 +740,107 @@ export function VenueViewportStage({
           )}
         </div>
       </div>
+
+      {/* Live Egress / Emergency Evacuation Telemetry HUD Banner */}
+      {evacMode !== 'none' && evacSimResult && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '60px',
+            left: '16px',
+            right: '16px',
+            zIndex: 9,
+            display: 'flex',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            className="vp-hud-bar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '6px 14px',
+              pointerEvents: 'auto',
+              borderColor:
+                evacMode === 'emergency_evacuation'
+                  ? evacSimResult.evacuationPass
+                    ? 'var(--status-pass-border)'
+                    : 'var(--status-fail-border)'
+                  : 'var(--border-subtle)',
+            }}
+          >
+            <button
+              type="button"
+              className="vp-btn"
+              style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+              onClick={() => {
+                if (
+                  !isPlayingEvac &&
+                  evacTimeSec >= evacSimResult.totalEvacuationTimeSec - 0.1
+                ) {
+                  setEvacTimeSec(0);
+                  setIsPlayingEvac(true);
+                } else {
+                  setIsPlayingEvac((p) => !p);
+                }
+              }}
+            >
+              {isPlayingEvac
+                ? 'Pause'
+                : evacTimeSec >= evacSimResult.totalEvacuationTimeSec - 0.1
+                  ? 'Replay'
+                  : 'Play'}
+            </button>
+
+            <input
+              type="range"
+              aria-label="Evacuation simulation timeline"
+              min={0}
+              max={evacSimResult.totalEvacuationTimeSec}
+              step={0.1}
+              value={Math.min(
+                evacTimeSec,
+                evacSimResult.totalEvacuationTimeSec,
+              )}
+              onChange={(e) => {
+                setIsPlayingEvac(false);
+                setEvacTimeSec(Number(e.target.value));
+              }}
+              style={{ width: '120px', accentColor: 'var(--accent-primary)' }}
+            />
+
+            <span className="mono" style={{ fontSize: '0.76rem' }}>
+              t={evacTimeSec.toFixed(1)}s /{' '}
+              {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
+            </span>
+
+            <div className="vp-divider-v" />
+
+            <span className="mono" style={{ fontSize: '0.75rem' }}>
+              Escaped: {evacCounts.exitedCount}/{snapshot.roster.length}
+            </span>
+
+            {evacCounts.queuingCount > 0 && (
+              <span className="vp-badge vp-badge-warn" style={{ fontSize: '0.72rem' }}>
+                Queueing: {evacCounts.queuingCount}
+              </span>
+            )}
+
+            <span
+              className={`vp-badge ${
+                evacSimResult.evacuationPass ? 'vp-badge-pass' : 'vp-badge-fail'
+              }`}
+              style={{ fontSize: '0.72rem' }}
+            >
+              Exits Open: {evacSimResult.activeExitCount}/
+              {evacSimResult.totalExitCount} · T_evac{' '}
+              {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 1:1 Optical Viewfinder Badge when in Seat POV */}
       {viewMode === 'attendee_pov' && (

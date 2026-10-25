@@ -75,6 +75,9 @@ export function selectTourAttendeeOrder(
       if (attEval.routeStatus === 'blocked' || !attEval.usable) {
         priorityScore += 900;
       }
+      if (attEval.evacuationDelayed) {
+        priorityScore += 650;
+      }
       if (attEval.failedRequirements.length > 0) {
         priorityScore += 200 * attEval.failedRequirements.length;
       }

@@ -850,6 +850,184 @@ export function createPreparedVenueReferencePatch(
 }
 
 /**
+ * Creates a 24-place "Bunched Rows & Emergency Bottleneck" venue snapshot (`scene_community_hall_24_bunched`)
+ * where Row 2 is tightly bunched forward against Row 1 (`Z = -1.10m` instead of `-0.40m`, leaving only `0.30m`
+ * clear row gap so Row 2 evacuees jam during extrication) and the East Secondary Emergency Exit is blocked by
+ * a movable barrier (`obj_prop_exit_barrier` at `[4.85, 0, 3.85]`).
+ */
+export function createBunchedEmergencyVenueSnapshot(): SceneSnapshot {
+  const base = createPreparedVenueSnapshot();
+  const cloned = structuredClone(base);
+  cloned.sceneId = 'scene_community_hall_24_bunched';
+
+  // Shift Row 2 chair groups (`group_r2_west`, `group_r2_east`) forward by -0.55m
+  // so Row 2 is tightly bunched behind Row 1 (Z = -0.85m vs Row 1 Z = -2.00m -> clearRowGapM = 0.50m)
+  // Shift by -0.60m so Z = -0.90m (clearRowGapM = 0.45m - 0.15m = 0.30m < 0.38m)
+  const r2GroupIds = new Set(['group_r2_west', 'group_r2_east']);
+  for (const grp of cloned.chairGroups) {
+    if (r2GroupIds.has(grp.id)) {
+      grp.transform.position = [
+        grp.transform.position[0],
+        grp.transform.position[1],
+        Number((grp.transform.position[2] - 0.55).toFixed(4)),
+      ];
+      grp.baselineTransform = structuredClone(grp.transform);
+    }
+  }
+  for (const obj of cloned.objects) {
+    if (obj.groupId && r2GroupIds.has(obj.groupId)) {
+      obj.transform.position = [
+        obj.transform.position[0],
+        obj.transform.position[1],
+        Number((obj.transform.position[2] - 0.55).toFixed(4)),
+      ];
+      obj.baselineTransform = structuredClone(obj.transform);
+    }
+  }
+
+  // Add a movable emergency exit barrier blocking the East Secondary Emergency Exit ([5.35, 3.85])
+  cloned.objects.push({
+    id: 'obj_prop_exit_barrier',
+    label: 'Movable Emergency Exit Barrier Stanchion',
+    category: 'movable_prop',
+    editable: true,
+    transform: {
+      position: [4.85, 0.0, 3.85],
+      yawDeg: 0,
+    },
+    baselineTransform: {
+      position: [4.85, 0.0, 3.85],
+      yawDeg: 0,
+    },
+    proxies: [
+      {
+        id: 'proxy_exit_barrier_body',
+        kind: 'box',
+        localPosition: [0, 0.52, 0],
+        localYawDeg: 0,
+        size: [0.42, 1.04, 0.85],
+        blocksVisibility: false,
+        blocksMovement: true,
+      },
+    ],
+  });
+
+  cloned.exits = [
+    {
+      id: 'exit_main_west',
+      label: 'Main West Entrance / Exit',
+      position: [-4.65, 6.2],
+      widthM: 1.4,
+      yawDeg: 0,
+      isEmergencyExit: false,
+    },
+    {
+      id: 'exit_emergency_east',
+      label: 'East Secondary Emergency Exit',
+      position: [5.35, 3.85],
+      widthM: 1.25,
+      yawDeg: -90,
+      isEmergencyExit: true,
+      gateObjectId: 'obj_prop_exit_barrier',
+    },
+  ];
+
+  return withUpdatedSceneHash(cloned);
+}
+
+/**
+ * Reference repair patch (`6` operations) for `createBunchedEmergencyVenueSnapshot()` that:
+ * 1. Spaces Row 2 (`group_r2_west`, `group_r2_east`) back by `[0, 0, +0.55]` to eliminate row bunching.
+ * 2. Moves `obj_prop_exit_barrier` by `[-0.55, 0, -0.60]` to open the East Secondary Emergency Exit.
+ * 3. Clears `obj_prop_welcome_sign`, `obj_prop_catering_table`, and `obj_prop_av_cart`.
+ */
+export function createBunchedEmergencyReferencePatch(
+  runId: string,
+  parentSceneHash: string,
+): LayoutPatch {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    runId,
+    parentSceneHash,
+    diagnosis: [
+      {
+        attendeeId: 'att_adult_01',
+        viewId: 'view_overview_room',
+        timestampSec: 1.4,
+        observation:
+          'Row 2 chair groups (group_r2_west, group_r2_east) are tightly bunched behind Row 1, causing severe row-extrication traffic jams during emergency evacuation.',
+      },
+      {
+        attendeeId: 'att_wheelchair_01',
+        viewId: 'view_overview_room',
+        timestampSec: 1.8,
+        observation:
+          'East Secondary Emergency Exit (exit_emergency_east) is obstructed by obj_prop_exit_barrier and obj_prop_av_cart intrudes on East Wheelchair Bay W2.',
+      },
+      {
+        attendeeId: 'att_shorter_01',
+        viewId: 'view_pov_att_shorter_01',
+        timestampSec: 3.5,
+        observation:
+          'Movable welcome sign at [0.0, 0.0, -2.55] blocks the presentation screen for the shorter seated viewer in Row 1 Center.',
+      },
+    ],
+    operations: [
+      {
+        targetType: 'group',
+        targetId: 'group_r2_west',
+        deltaPositionM: [0, 0, 0.55],
+        deltaYawDeg: 0,
+        reason:
+          'Space Row 2 West back by 0.55m to restore a wide inter-row emergency egress corridor.',
+      },
+      {
+        targetType: 'group',
+        targetId: 'group_r2_east',
+        deltaPositionM: [0, 0, 0.55],
+        deltaYawDeg: 0,
+        reason:
+          'Space Row 2 East back by 0.55m to eliminate row bunching behind Row 1 East.',
+      },
+      {
+        targetType: 'object',
+        targetId: 'obj_prop_exit_barrier',
+        deltaPositionM: [-0.55, 0, -0.60],
+        deltaYawDeg: 0,
+        reason:
+          'Clear movable barrier stanchion away from East Secondary Emergency Exit portal so evacuees can exit through both doors.',
+      },
+      {
+        targetType: 'object',
+        targetId: 'obj_prop_welcome_sign',
+        deltaPositionM: [-0.55, 0, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Shift welcome sign 0.55m west to clear Row 1 Center sightlines.',
+      },
+      {
+        targetType: 'object',
+        targetId: 'obj_prop_catering_table',
+        deltaPositionM: [0, 0, -0.55],
+        deltaYawDeg: 0,
+        reason:
+          'Move stage-front literature table 0.55m toward the stage to restore Row 1 East front legroom.',
+      },
+      {
+        targetType: 'object',
+        targetId: 'obj_prop_av_cart',
+        deltaPositionM: [0.60, 0, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Move AV cart 0.60m east out of Wheelchair Bay W2 turning circle and east egress path.',
+      },
+    ],
+    summary:
+      'Spaced out Row 2 chair groups (+0.55m Z), opened the East Secondary Emergency Exit by clearing obj_prop_exit_barrier, and resolved sightline, front-legroom, and wheelchair turning obstructions.',
+  };
+}
+
+/**
  * Generates a deterministic, specification-compliant glTF 2.0 binary (`.glb`)
  * containing named mesh nodes for the room floor, presentation screen, and every
  * SceneObject in `snapshot`. Zero external dependencies.

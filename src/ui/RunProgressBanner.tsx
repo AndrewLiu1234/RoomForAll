@@ -21,10 +21,12 @@ export interface RunProgressBannerProps {
   isCapturingClip: boolean;
   captureStatusText: string | null;
   errorText: string | null;
-  venuePreset?: 'prepared_24' | 'dev_4';
+  venuePreset?: 'prepared_24' | 'bunched_emergency_24' | 'dev_4';
   unmetCount?: number;
   totalSeats?: number;
-  onSelectVenuePreset?: (preset: 'prepared_24' | 'dev_4') => void;
+  onSelectVenuePreset?: (
+    preset: 'prepared_24' | 'bunched_emergency_24' | 'dev_4',
+  ) => void;
   onStartLiveRun: () => void;
   onPreviewLocalRepair: () => void;
   onResetToBaseline: () => void;
@@ -114,6 +116,18 @@ export function RunProgressBanner({
               onClick={() => onSelectVenuePreset('prepared_24')}
             >
               Village Hall · 24
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'bunched_emergency_24'
+                  ? 'vp-segment-btn-active'
+                  : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('bunched_emergency_24')}
+            >
+              Bunched Evac · 24
             </button>
             <button
               type="button"

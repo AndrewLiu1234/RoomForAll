@@ -11,7 +11,11 @@ import {
   type EvidenceManifest,
   type SceneSnapshot,
 } from '../shared/index.js';
-import { captureEvidence as streamACaptureEvidence } from '../scene/index.js';
+import {
+  buildVenueExitPortalNodes,
+  captureEvidence as streamACaptureEvidence,
+  createArticulatedAvatarMesh,
+} from '../scene/index.js';
 
 /**
  * Builds default tour keyframes (overview + representative attendee POVs) when the server's
@@ -283,7 +287,10 @@ export function populateThreeSceneFromSnapshot(
     scene.add(group);
   }
 
-  // Render finite-height attendee torso/head proxies (excluding hidden POV viewer)
+  // Render architectural Exit Door Portals
+  scene.add(buildVenueExitPortalNodes(snapshot));
+
+  // Render finite-height articulated attendee avatars (excluding hidden POV viewer)
   for (const member of snapshot.roster) {
     if (member.attendeeId === options.hideAttendeeId) continue;
     try {
@@ -291,20 +298,29 @@ export function populateThreeSceneFromSnapshot(
         snapshot,
         member.attendeeId,
       );
-      const [tx, ty, tz] = torsoBox.centerWorld;
-      const [sx, sy, sz] = torsoBox.size;
-      const geo = new THREE.BoxGeometry(sx, sy, sz);
-      const mat = new THREE.MeshStandardMaterial({
-        color: 0x3b82f6,
-        roughness: 0.5,
-        transparent: true,
-        opacity: options.forBlindEvidenceCapture ? 0.92 : 0.72,
+      const proxyGroup = new THREE.Group();
+      proxyGroup.name = torsoBox.id;
+      proxyGroup.userData = {
+        attendeeId: member.attendeeId,
+        ownerAttendeeId: member.attendeeId,
+        ownerObjectId: torsoBox.ownerObjectId,
+        placeId: member.assignedPlaceId,
+        profileId: member.profileId,
+      };
+      const { rootMesh } = createArticulatedAvatarMesh({
+        attendeeId: member.attendeeId,
+        profileId: member.profileId,
+        placeId: member.assignedPlaceId,
+        torsoBox,
+        baseColorHex: 0x3b82f6,
+        cleanForEvidenceCapture: options.forBlindEvidenceCapture,
       });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(tx, ty, tz);
-      mesh.rotation.y = torsoBox.yawDeg * DEG_TO_RAD;
-      mesh.userData = { attendeeId: member.attendeeId };
-      scene.add(mesh);
+      rootMesh.userData = {
+        ...rootMesh.userData,
+        attendeeId: member.attendeeId,
+      };
+      proxyGroup.add(rootMesh);
+      scene.add(proxyGroup);
     } catch {
       // Skip if assignment is invalid
     }
