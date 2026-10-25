@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type {
   AttendeeAssignment,
   Evaluation,
+  ProfileId,
   SceneSnapshot,
 } from '../shared/index.js';
 
@@ -13,6 +14,9 @@ export interface RosterPanelProps {
   onSelectAttendee: (attendeeId: string) => void;
   onChangePlaceAssignment: (attendeeId: string, newPlaceId: string) => void;
   onOpenProfileEditor: () => void;
+  onAddAttendee?: (placeId: string, profileId: ProfileId) => void;
+  onRemoveAttendee?: (attendeeId: string) => void;
+  onRandomizeFourAttendees?: () => void;
 }
 
 export function RosterPanel({
@@ -23,6 +27,9 @@ export function RosterPanel({
   onSelectAttendee,
   onChangePlaceAssignment,
   onOpenProfileEditor,
+  onAddAttendee,
+  onRemoveAttendee,
+  onRandomizeFourAttendees,
 }: RosterPanelProps): React.ReactElement {
   const selectedAttendee = snapshot.roster.find(
     (a) => a.attendeeId === selectedAttendeeId,
@@ -36,6 +43,42 @@ export function RosterPanel({
   const selectedPlace = selectedAttendee
     ? snapshot.places.find((p) => p.id === selectedAttendee.assignedPlaceId)
     : undefined;
+
+  const occupiedPlaceIds = useMemo(
+    () => new Set(snapshot.roster.map((m) => m.assignedPlaceId)),
+    [snapshot.roster],
+  );
+
+  const emptyPlaces = useMemo(
+    () => snapshot.places.filter((p) => !occupiedPlaceIds.has(p.id)),
+    [snapshot.places, occupiedPlaceIds],
+  );
+
+  const [newPlaceId, setNewPlaceId] = useState<string>(
+    () => emptyPlaces[0]?.id ?? '',
+  );
+  const [newProfileId, setNewProfileId] =
+    useState<ProfileId>('reference_adult');
+
+  useEffect(() => {
+    if (!emptyPlaces.some((p) => p.id === newPlaceId)) {
+      const firstEmpty = emptyPlaces[0];
+      setNewPlaceId(firstEmpty?.id ?? '');
+      if (firstEmpty) {
+        setNewProfileId(
+          firstEmpty.kind === 'wheelchair_bay'
+            ? 'wheelchair_user'
+            : 'reference_adult',
+        );
+      }
+    }
+  }, [emptyPlaces, newPlaceId]);
+
+  const targetEmptyPlace = emptyPlaces.find((p) => p.id === newPlaceId);
+  const compatibleProfilesForNewSeat: ProfileId[] =
+    targetEmptyPlace?.kind === 'wheelchair_bay'
+      ? ['wheelchair_user']
+      : ['reference_adult', 'shorter_seated', 'extra_legroom'];
 
   return (
     <aside
@@ -68,13 +111,15 @@ export function RosterPanel({
               fontWeight: 600,
             }}
           >
-            Prepared Venue Baseline
+            Active 3D Venue Scene
           </span>
           <span className="vp-badge vp-badge-neutral mono">
             {snapshot.source.license}
           </span>
         </div>
-        <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '4px' }}>
+        <div
+          style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '4px' }}
+        >
           {snapshot.source.title}
         </div>
         <div
@@ -88,11 +133,150 @@ export function RosterPanel({
         >
           <span className="mono">{snapshot.sceneHash}</span>
           <span>
-            Capacity: <strong>{evaluation.occupiedCount}</strong> /{' '}
+            Seated: <strong>{evaluation.occupiedCount}</strong> /{' '}
             <strong>{evaluation.capacityCount}</strong> places
           </span>
         </div>
       </div>
+
+      {/* Add / Randomize People in Parsed Seats Card */}
+      {!isFrozen && (onAddAttendee || onRandomizeFourAttendees) && (
+        <div
+          className="vp-card-inner"
+          style={{
+            border: '1px solid rgba(56, 189, 248, 0.3)',
+            background: 'rgba(15, 23, 42, 0.72)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: '#7dd3fc',
+              }}
+            >
+              Manage People in Seats ({emptyPlaces.length} empty)
+            </span>
+            {onRandomizeFourAttendees && (
+              <button
+                type="button"
+                className="vp-btn"
+                style={{
+                  padding: '3px 8px',
+                  fontSize: '0.71rem',
+                  borderColor: 'rgba(56, 189, 248, 0.45)',
+                  color: '#bae6fd',
+                }}
+                onClick={onRandomizeFourAttendees}
+                title="Spawn 4 people at random across the parsed seats"
+              >
+                Randomize 4 People
+              </button>
+            )}
+          </div>
+
+          {onAddAttendee && emptyPlaces.length > 0 ? (
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '6px',
+                }}
+              >
+                <select
+                  aria-label="Select empty seat"
+                  value={newPlaceId}
+                  onChange={(e) => {
+                    const pid = e.target.value;
+                    setNewPlaceId(pid);
+                    const picked = emptyPlaces.find((p) => p.id === pid);
+                    if (picked) {
+                      setNewProfileId(
+                        picked.kind === 'wheelchair_bay'
+                          ? 'wheelchair_user'
+                          : 'reference_adult',
+                      );
+                    }
+                  }}
+                  style={{
+                    fontSize: '0.73rem',
+                    padding: '4px 6px',
+                    borderRadius: 'var(--radius-inner)',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-surface-elevated)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {emptyPlaces.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label} ({p.kind === 'wheelchair_bay' ? 'Bay' : 'Seat'})
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  aria-label="Select profile for new person"
+                  value={
+                    compatibleProfilesForNewSeat.includes(newProfileId)
+                      ? newProfileId
+                      : compatibleProfilesForNewSeat[0]!
+                  }
+                  onChange={(e) => setNewProfileId(e.target.value as ProfileId)}
+                  style={{
+                    fontSize: '0.73rem',
+                    padding: '4px 6px',
+                    borderRadius: 'var(--radius-inner)',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-surface-elevated)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {compatibleProfilesForNewSeat.map((profId) => (
+                    <option key={profId} value={profId}>
+                      {snapshot.profiles[profId]?.label ?? profId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                className="vp-btn vp-btn-primary"
+                style={{ width: '100%', padding: '5px 8px', fontSize: '0.75rem' }}
+                onClick={() => {
+                  if (!newPlaceId) return;
+                  const chosenProfile = compatibleProfilesForNewSeat.includes(
+                    newProfileId,
+                  )
+                    ? newProfileId
+                    : compatibleProfilesForNewSeat[0]!;
+                  onAddAttendee(newPlaceId, chosenProfile);
+                }}
+              >
+                + Add Person to Selected Seat
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+              All {snapshot.places.length} parsed seats are currently occupied.
+              Remove a person below to free a seat.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Roster Section Header */}
       <div
@@ -104,7 +288,7 @@ export function RosterPanel({
       >
         <div>
           <h2 style={{ margin: 0, fontSize: '0.92rem' }}>
-            Guest Roster &amp; Places
+            Guest Roster ({snapshot.roster.length})
           </h2>
           <p
             style={{
@@ -115,7 +299,7 @@ export function RosterPanel({
           >
             {isFrozen
               ? 'Frozen during active/completed run'
-              : 'Select an attendee to inspect POV & requirements'}
+              : 'Click a person or seat ring to inspect POV'}
           </p>
         </div>
 
@@ -166,17 +350,42 @@ export function RosterPanel({
                 <span style={{ fontWeight: 600, fontSize: '0.86rem' }}>
                   {member.label}
                 </span>
-                {attEval && (
-                  <span
-                    className={`vp-badge ${
-                      attEval.clearAndUsable ? 'vp-badge-pass' : 'vp-badge-fail'
-                    }`}
-                  >
-                    {attEval.clearAndUsable
-                      ? 'Clear & Usable'
-                      : `${attEval.failedRequirements.length} Failed`}
-                  </span>
-                )}
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {attEval && (
+                    <span
+                      className={`vp-badge ${
+                        attEval.clearAndUsable
+                          ? 'vp-badge-pass'
+                          : 'vp-badge-fail'
+                      }`}
+                    >
+                      {attEval.clearAndUsable
+                        ? 'Clear & Usable'
+                        : `${attEval.failedRequirements.length} Failed`}
+                    </span>
+                  )}
+                  {!isFrozen && onRemoveAttendee && (
+                    <button
+                      type="button"
+                      className="vp-btn"
+                      style={{
+                        padding: '2px 6px',
+                        fontSize: '0.68rem',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#fca5a5',
+                      }}
+                      title={`Remove ${member.label} from ${member.assignedPlaceId}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveAttendee(member.attendeeId);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div
@@ -233,7 +442,11 @@ export function RosterPanel({
                     )
                     .map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.label} ({p.kind === 'wheelchair_bay' ? 'Bay' : `${p.seatHeightM}m`})
+                        {p.label} (
+                        {p.kind === 'wheelchair_bay'
+                          ? 'Bay'
+                          : `${p.seatHeightM}m`}
+                        )
                       </option>
                     ))}
                 </select>
@@ -248,9 +461,12 @@ export function RosterPanel({
                   }}
                 >
                   <span>
-                    Footprint: {place.widthM.toFixed(2)}m × {place.depthM.toFixed(2)}m
+                    Footprint: {place.widthM.toFixed(2)}m ×{' '}
+                    {place.depthM.toFixed(2)}m
                   </span>
-                  <span>{place.isAisle ? 'Aisle Place' : 'Interior Place'}</span>
+                  <span>
+                    {place.isAisle ? 'Aisle Place' : 'Interior Place'}
+                  </span>
                 </div>
               )}
             </div>
@@ -272,7 +488,10 @@ export function RosterPanel({
             <h3 style={{ margin: 0, fontSize: '0.84rem' }}>
               Modeled Checks: {selectedAttendee.label}
             </h3>
-            <span className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+            <span
+              className="mono"
+              style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}
+            >
               Eye Y = {selectedEval.eyePositionWorld[1].toFixed(2)}m
             </span>
           </div>
@@ -295,7 +514,10 @@ export function RosterPanel({
               {Math.round(selectedEval.sampledVisibility * 100)}%)
             </span>
 
-            <span>Modeled Route Clearance (&gt;={selectedProfile.requiredRouteWidthM.toFixed(2)}m):</span>
+            <span>
+              Modeled Route Clearance (&gt;=
+              {selectedProfile.requiredRouteWidthM.toFixed(2)}m):
+            </span>
             <span
               className={`vp-badge ${
                 selectedEval.routeStatus === 'clear'
@@ -303,10 +525,16 @@ export function RosterPanel({
                   : 'vp-badge-fail'
               }`}
             >
-              {selectedEval.routeStatus === 'clear' ? 'Route Clear' : 'Route Blocked'}
+              {selectedEval.routeStatus === 'clear'
+                ? 'Route Clear'
+                : 'Route Blocked'}
             </span>
 
-            <span>Footprint Fit ({selectedProfile.requiredFootprintWidthM.toFixed(2)}×{selectedProfile.requiredFootprintDepthM.toFixed(2)}m):</span>
+            <span>
+              Footprint Fit (
+              {selectedProfile.requiredFootprintWidthM.toFixed(2)}×
+              {selectedProfile.requiredFootprintDepthM.toFixed(2)}m):
+            </span>
             <span
               className={`vp-badge ${
                 selectedEval.footprintFitPass
@@ -317,7 +545,10 @@ export function RosterPanel({
               {selectedEval.footprintFitPass ? 'Pass' : 'Fail'}
             </span>
 
-            <span>Required Front Legroom ({selectedProfile.requiredFrontLegroomM.toFixed(2)}m):</span>
+            <span>
+              Required Front Legroom (
+              {selectedProfile.requiredFrontLegroomM.toFixed(2)}m):
+            </span>
             <span
               className={`vp-badge ${
                 selectedEval.legroomPass ? 'vp-badge-pass' : 'vp-badge-fail'
@@ -326,7 +557,13 @@ export function RosterPanel({
               {selectedEval.legroomPass ? 'Pass' : 'Fail'}
             </span>
 
-            <span>Turning Space ({selectedProfile.requiredTurningCircleDiameterM > 0 ? `${selectedProfile.requiredTurningCircleDiameterM.toFixed(2)}m` : 'N/A'}):</span>
+            <span>
+              Turning Space (
+              {selectedProfile.requiredTurningCircleDiameterM > 0
+                ? `${selectedProfile.requiredTurningCircleDiameterM.toFixed(2)}m`
+                : 'N/A'}
+              ):
+            </span>
             <span
               className={`vp-badge ${
                 selectedEval.turningSpacePass
@@ -350,7 +587,8 @@ export function RosterPanel({
             >
               {selectedProfile.eyeHeightMode === 'seat_offset' ? (
                 <span>
-                  Derived Eye Height: Seat {selectedPlace.seatHeightM.toFixed(2)}m + Offset{' '}
+                  Derived Eye Height: Seat{' '}
+                  {selectedPlace.seatHeightM.toFixed(2)}m + Offset{' '}
                   {(selectedProfile.eyeOffsetAboveSeatM ?? 0.75).toFixed(2)}m ={' '}
                   <strong>{selectedEval.eyePositionWorld[1].toFixed(2)}m</strong>
                 </span>

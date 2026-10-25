@@ -32,10 +32,14 @@ export {
 } from './preparedVenue.js';
 
 export {
+  STANDALONE_GLB_ALIGNMENT,
   generateSampleCustomAuditoriumGlb,
   getUploadedGlbBytesForScene,
+  getUploadedGlbGroupForScene,
+  isStandaloneUploadedGlbScene,
   parseAndLabelGlbVenue,
   parseAndLabelGlbVenueAsync,
+  spawnRandomFourAttendees,
   type AutoLabeledGlbNode,
   type AutoLabeledNodeRole,
   type GlbParseProgressUpdate,

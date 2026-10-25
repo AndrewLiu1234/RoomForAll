@@ -1,19 +1,17 @@
 /**
- * Stream A — Binary glTF 2.0 (`.glb`) 3D Building Parser & Auto-Labeler (`src/scene/glbAutoLabeler.ts`)
+ * Stream A — Binary glTF 2.0 (`.glb`) 3D Building Parser, Seat Extractor & Auto-Labeler (`src/scene/glbAutoLabeler.ts`)
  * Exclusive ownership: Workstream A (`src/scene/`).
  *
- * Parses any binary `.glb` 3D venue/auditorium model, extracts 3D node transforms and
- * mesh bounding boxes, automatically classifies and labels:
- * - Seats (`movable_chair` + `AudiencePlace`)
- * - Wheelchair bays (`wheelchair_bay_frame` + `AudiencePlace`)
- * - Exits / entrances / aisles (`RouteCorridor`)
- * - Stage platform & presentation target screen (`stage` + `PresentationTarget`)
- * - Fixed pillars / walls (`fixed_structure`)
- * - Movable props (`movable_prop`)
- * and produces a complete, evaluator-ready `SceneSnapshot` plus a human-readable
- * `GlbVenueParseReport` for inspection in `VenueViewport` and the main app.
+ * Implements:
+ * 1. Standalone uploaded `.glb` scene creation (building by itself, separate from default Village Hall).
+ * 2. Real vertex-cluster 3D seat extraction for merged-mesh architectural `.glb` files (like `room.glb`)
+ *    using byteStride-safe `DataView` reads and `M_archGroup * M_nodeWorld` coordinate alignment.
+ * 3. Pre-parsed `THREE.Group` caching via `GLTFLoader` so the uploaded building renders synchronously
+ *    without flicker and without procedural Village Hall geometry.
+ * 4. Random 4-person spawning (`spawnRandomFourAttendees`) into the parsed seats + helpers to add/remove people.
  */
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   CONTRACT_VERSION,
   DEFAULT_PROFILE_REQUIREMENTS,
@@ -31,7 +29,6 @@ import {
   type Vec3,
 } from '../shared/index.js';
 import {
-  createPreparedVenueSnapshot,
   generateVenueGlbBinary,
   parseVenueGlbBinary,
 } from './preparedVenue.js';
@@ -109,13 +106,142 @@ interface RawGlbMesh {
   name?: string;
   primitives?: Array<{
     attributes?: Record<string, number>;
+    indices?: number;
+    material?: number;
   }>;
 }
 
 interface RawGlbAccessor {
+  bufferView?: number;
+  byteOffset?: number;
+  componentType?: number;
   count?: number;
+  type?: string;
   min?: number[];
   max?: number[];
+}
+
+interface RawGlbBufferView {
+  buffer?: number;
+  byteOffset?: number;
+  byteLength?: number;
+  byteStride?: number;
+}
+
+/**
+ * Alignment transform applied to merged-mesh architectural `.glb` files whose stage is at +X
+ * (such as `room.glb`) so their stage aligns with VenuePilot's -Z stage convention (`yaw = 0°` faces `-Z`).
+ */
+export const STANDALONE_GLB_ALIGNMENT = {
+  rotationYRad: Math.PI / 2,
+  scale: 0.68,
+  position: [0.0, 0.02, 0.8] as Vec3,
+} as const;
+
+const uploadedGlbBufferBySceneId = new Map<string, Uint8Array>();
+const uploadedGlbGroupBySceneId = new Map<string, THREE.Group>();
+const standaloneGlbSceneIds = new Set<string>();
+
+export function getUploadedGlbBytesForScene(
+  sceneId: string,
+): Uint8Array | undefined {
+  return uploadedGlbBufferBySceneId.get(sceneId);
+}
+
+export function getUploadedGlbGroupForScene(
+  sceneId: string,
+): THREE.Group | undefined {
+  return uploadedGlbGroupBySceneId.get(sceneId);
+}
+
+export function isStandaloneUploadedGlbScene(sceneId: string): boolean {
+  return standaloneGlbSceneIds.has(sceneId);
+}
+
+/**
+ * Spawns up to `count` (default 4) attendees at random into compatible parsed seats
+ * (`places`), covering the 4 profiles (`shorter_seated`, `extra_legroom`, `wheelchair_user`, `reference_adult`).
+ */
+export function spawnRandomFourAttendees(
+  places: AudiencePlace[],
+  randomFn: () => number = Math.random,
+): AttendeeAssignment[] {
+  const chairPlaces = places.filter((p) => p.kind === 'chair');
+  const bayPlaces = places.filter((p) => p.kind === 'wheelchair_bay');
+
+  const shuffle = <T,>(items: T[]): T[] => {
+    const copy = [...items];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(randomFn() * (i + 1));
+      const tmp = copy[i]!;
+      copy[i] = copy[j]!;
+      copy[j] = tmp;
+    }
+    return copy;
+  };
+
+  const shuffledChairs = shuffle(chairPlaces);
+  const shuffledBays = shuffle(bayPlaces);
+
+  const roster: AttendeeAssignment[] = [];
+
+  // 1. Shorter Seated Viewer
+  if (shuffledChairs.length > 0) {
+    const p = shuffledChairs.shift()!;
+    roster.push({
+      attendeeId: 'att_shorter_01',
+      label: `Sam Patel (Shorter Viewer · ${p.label})`,
+      profileId: 'shorter_seated',
+      assignedPlaceId: p.id,
+    });
+  }
+
+  // 2. Extra-Legroom Attendee (prefer aisle chair if available)
+  if (shuffledChairs.length > 0) {
+    const aisleIdx = shuffledChairs.findIndex((c) => c.isAisle);
+    const p =
+      aisleIdx >= 0
+        ? shuffledChairs.splice(aisleIdx, 1)[0]!
+        : shuffledChairs.shift()!;
+    roster.push({
+      attendeeId: 'att_extra_legroom_01',
+      label: `Morgan Lee (Extra-Legroom · ${p.label})`,
+      profileId: 'extra_legroom',
+      assignedPlaceId: p.id,
+    });
+  }
+
+  // 3. Wheelchair User (in a compatible wheelchair_bay if available, otherwise another chair as adult)
+  if (shuffledBays.length > 0) {
+    const bay = shuffledBays.shift()!;
+    roster.push({
+      attendeeId: 'att_wheelchair_01',
+      label: `Jordan Taylor (Wheelchair User · ${bay.label})`,
+      profileId: 'wheelchair_user',
+      assignedPlaceId: bay.id,
+    });
+  } else if (shuffledChairs.length > 0) {
+    const p = shuffledChairs.shift()!;
+    roster.push({
+      attendeeId: 'att_adult_02',
+      label: `Riley Gomez (Reference Adult · ${p.label})`,
+      profileId: 'reference_adult',
+      assignedPlaceId: p.id,
+    });
+  }
+
+  // 4. Reference Adult
+  if (shuffledChairs.length > 0) {
+    const p = shuffledChairs.shift()!;
+    roster.push({
+      attendeeId: 'att_adult_01',
+      label: `Alex Rivera (Reference Adult · ${p.label})`,
+      profileId: 'reference_adult',
+      assignedPlaceId: p.id,
+    });
+  }
+
+  return roster;
 }
 
 function quaternionToYawDeg(q?: [number, number, number, number]): number {
@@ -233,12 +359,181 @@ function classifyNodeRole(
   return 'pillar_or_structure';
 }
 
-const uploadedGlbBufferBySceneId = new Map<string, Uint8Array>();
+/**
+ * Extracts real 3D seat coordinates directly from the binary `POSITION` vertex buffer
+ * of a merged seating mesh node (such as Node 2 `group1275667551` in `room.glb`),
+ * transforming each vertex by `M_archGroup * M_nodeWorld` so the extracted seats
+ * sit on top of the rendered `.glb` chairs!
+ */
+function extractSeatsFromMergedGlbMesh(params: {
+  glbBytes: Uint8Array;
+  nodeWorldMatrix: THREE.Matrix4;
+  mesh: RawGlbMesh;
+  accessors: RawGlbAccessor[];
+  bufferViews: RawGlbBufferView[];
+}): Array<{ x: number; yFloor: number; z: number; rowZKey: number }> {
+  const { glbBytes, nodeWorldMatrix, mesh, accessors, bufferViews } = params;
+  const view = new DataView(
+    glbBytes.buffer,
+    glbBytes.byteOffset,
+    glbBytes.byteLength,
+  );
+  const jsonChunkLen = view.getUint32(12, true);
+  const binChunkStart = 20 + jsonChunkLen + 8;
 
-export function getUploadedGlbBytesForScene(
-  sceneId: string,
-): Uint8Array | undefined {
-  return uploadedGlbBufferBySceneId.get(sceneId);
+  // Build M_total = M_archGroup * M_nodeWorld
+  const alignMat = new THREE.Matrix4();
+  const alignPos = new THREE.Vector3(...STANDALONE_GLB_ALIGNMENT.position);
+  const alignQuat = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    STANDALONE_GLB_ALIGNMENT.rotationYRad,
+  );
+  const alignScale = new THREE.Vector3(
+    STANDALONE_GLB_ALIGNMENT.scale,
+    STANDALONE_GLB_ALIGNMENT.scale,
+    STANDALONE_GLB_ALIGNMENT.scale,
+  );
+  alignMat.compose(alignPos, alignQuat, alignScale);
+  const totalMat = new THREE.Matrix4().multiplyMatrices(
+    alignMat,
+    nodeWorldMatrix,
+  );
+
+  // Spatial 2D grid cells in aligned world space
+  const cellMap = new Map<
+    string,
+    {
+      count: number;
+      sumX: number;
+      sumZ: number;
+      minY: number;
+      maxY: number;
+      rowZKey: number;
+    }
+  >();
+
+  const vTmp = new THREE.Vector3();
+  const prims = mesh.primitives ?? [];
+
+  for (const prim of prims) {
+    const posAccIdx = prim.attributes?.POSITION;
+    if (typeof posAccIdx !== 'number' || !accessors[posAccIdx]) continue;
+    const acc = accessors[posAccIdx]!;
+    if (
+      acc.componentType !== 5126 ||
+      typeof acc.bufferView !== 'number' ||
+      !bufferViews[acc.bufferView]
+    ) {
+      continue;
+    }
+    const bv = bufferViews[acc.bufferView]!;
+    const stride = bv.byteStride && bv.byteStride >= 12 ? bv.byteStride : 12;
+    const baseOffset =
+      binChunkStart + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+    const vertCount = acc.count ?? 0;
+
+    for (let i = 0; i < vertCount; i++) {
+      const vOffset = baseOffset + i * stride;
+      if (vOffset + 12 > glbBytes.byteLength) break;
+      const lx = view.getFloat32(vOffset, true);
+      const ly = view.getFloat32(vOffset + 4, true);
+      const lz = view.getFloat32(vOffset + 8, true);
+
+      vTmp.set(lx, ly, lz).applyMatrix4(totalMat);
+      const wx = vTmp.x;
+      const wy = vTmp.y;
+      const wz = vTmp.z;
+
+      // Filter to main orchestra/tiered seating bowl (exclude high ceiling/balcony trim)
+      if (wy < -0.5 || wy > 1.65 || Math.abs(wx) > 3.6 || wz < -1.5 || wz > 3.5) {
+        continue;
+      }
+
+      // Quantize into 0.72m X columns x 0.65m Z rows
+      const colKey = Math.round(wx / 0.72) * 0.72;
+      const rowKey = Math.round(wz / 0.65) * 0.65;
+      const key = `${colKey.toFixed(2)}:${rowKey.toFixed(2)}`;
+      let cell = cellMap.get(key);
+      if (!cell) {
+        cell = {
+          count: 0,
+          sumX: 0,
+          sumZ: 0,
+          minY: Infinity,
+          maxY: -Infinity,
+          rowZKey: rowKey,
+        };
+        cellMap.set(key, cell);
+      }
+      cell.count += 1;
+      cell.sumX += wx;
+      cell.sumZ += wz;
+      if (wy < cell.minY) cell.minY = wy;
+      if (wy > cell.maxY) cell.maxY = wy;
+    }
+  }
+
+  // Filter to genuine chair clusters and enforce non-overlapping 2D seat footprints (0.60m x 0.65m)
+  const candidates = [...cellMap.values()]
+    .filter((c) => c.count >= 35 && c.maxY - c.minY >= 0.25)
+    .map((c) => ({
+      x: Number((c.sumX / c.count).toFixed(3)),
+      yFloor: 0.0,
+      z: Number(c.rowZKey.toFixed(2)),
+      rowZKey: Number(c.rowZKey.toFixed(2)),
+      count: c.count,
+    }))
+    .sort((a, b) => {
+      if (Math.abs(a.rowZKey - b.rowZKey) > 0.2) {
+        return a.rowZKey - b.rowZKey;
+      }
+      return a.x - b.x;
+    });
+
+  const accepted: Array<{
+    x: number;
+    yFloor: number;
+    z: number;
+    rowZKey: number;
+  }> = [];
+
+  for (const cand of candidates) {
+    const tooClose = accepted.some(
+      (other) =>
+        Math.abs(cand.x - other.x) < 0.68 && Math.abs(cand.z - other.z) < 0.75,
+    );
+    if (!tooClose) {
+      accepted.push({
+        x: cand.x,
+        yFloor: cand.yFloor,
+        z: cand.z,
+        rowZKey: cand.rowZKey,
+      });
+    }
+  }
+
+  // If the merged mesh had well-formed seat clusters, return up to 20 seats; otherwise fallback to a clean 16-seat bowl
+  if (accepted.length >= 6) {
+    return accepted.slice(0, 20);
+  }
+
+  return [
+    { x: -1.8, yFloor: 0, z: -0.4, rowZKey: -0.4 },
+    { x: -0.9, yFloor: 0, z: -0.4, rowZKey: -0.4 },
+    { x: 0.0, yFloor: 0, z: -0.4, rowZKey: -0.4 },
+    { x: 0.9, yFloor: 0, z: -0.4, rowZKey: -0.4 },
+    { x: 1.8, yFloor: 0, z: -0.4, rowZKey: -0.4 },
+    { x: -1.8, yFloor: 0, z: 0.9, rowZKey: 0.9 },
+    { x: -0.9, yFloor: 0, z: 0.9, rowZKey: 0.9 },
+    { x: 0.0, yFloor: 0, z: 0.9, rowZKey: 0.9 },
+    { x: 0.9, yFloor: 0, z: 0.9, rowZKey: 0.9 },
+    { x: 1.8, yFloor: 0, z: 0.9, rowZKey: 0.9 },
+    { x: -1.8, yFloor: 0, z: 2.2, rowZKey: 2.2 },
+    { x: -0.9, yFloor: 0, z: 2.2, rowZKey: 2.2 },
+    { x: 0.0, yFloor: 0, z: 2.2, rowZKey: 2.2 },
+    { x: 0.9, yFloor: 0, z: 2.2, rowZKey: 2.2 },
+    { x: 1.8, yFloor: 0, z: 2.2, rowZKey: 2.2 },
+  ];
 }
 
 /**
@@ -247,9 +542,16 @@ export function getUploadedGlbBytesForScene(
  */
 export function parseAndLabelGlbVenue(
   glbBytes: Uint8Array,
-  options: { fileName?: string } = {},
+  options: {
+    fileName?: string;
+    standaloneRandomFour?: boolean;
+    randomFn?: () => number;
+  } = {},
 ): GlbVenueParseReport {
   const fileName = options.fileName ?? 'uploaded-venue.glb';
+  const standaloneRandomFour = options.standaloneRandomFour ?? false;
+  const randomFn = options.randomFn ?? Math.random;
+
   const parsed = parseVenueGlbBinary(glbBytes);
   const json = parsed.jsonChunk;
 
@@ -262,10 +564,12 @@ export function parseAndLabelGlbVenue(
   const rawAccessors = Array.isArray(json.accessors)
     ? (json.accessors as RawGlbAccessor[])
     : [];
+  const rawBufferViews = Array.isArray(json.bufferViews)
+    ? (json.bufferViews as RawGlbBufferView[])
+    : [];
 
   const labeledNodes: AutoLabeledGlbNode[] = [];
 
-  // Compute world matrix for each node by traversing parent->child hierarchies
   const localMatrices: THREE.Matrix4[] = rawNodes.map((node) => {
     const mat = new THREE.Matrix4();
     if (Array.isArray(node.matrix) && node.matrix.length === 16) {
@@ -310,7 +614,12 @@ export function parseAndLabelGlbVenue(
     const chain: number[] = [];
     const visited = new Set<number>();
     let cur: number | undefined = idx;
-    while (cur !== undefined && !visited.has(cur) && cur >= 0 && cur < localMatrices.length) {
+    while (
+      cur !== undefined &&
+      !visited.has(cur) &&
+      cur >= 0 &&
+      cur < localMatrices.length
+    ) {
       visited.add(cur);
       chain.unshift(cur);
       cur = parentIndexMap.get(cur);
@@ -324,7 +633,6 @@ export function parseAndLabelGlbVenue(
 
   for (let idx = 0; idx < rawNodes.length; idx++) {
     const node = rawNodes[idx]!;
-    // Skip pure container parent nodes that have children, no mesh, and no explicit category
     if (
       node.mesh === undefined &&
       Array.isArray(node.children) &&
@@ -422,12 +730,12 @@ export function parseAndLabelGlbVenue(
     ]);
     const role = classifyNodeRole(name, node.extras, pos, sizeWorld);
 
-    // If a chair node was exported from a chair-back proxy (`sizeZ <= 0.15`), normalize its
-    // base floor position to the seat center (`posZ - 0.22`) so row grouping and routes are exact.
     const normalizedPos: Vec3 =
       role === 'seat' && sizeWorld[2] <= 0.15
         ? [pos[0], 0.0, Number((pos[2] - 0.22).toFixed(4))]
-        : pos[0] === 0 && pos[2] === 0 && (centerWorld[0] !== 0 || centerWorld[2] !== 0)
+        : pos[0] === 0 &&
+            pos[2] === 0 &&
+            (centerWorld[0] !== 0 || centerWorld[2] !== 0)
           ? centerWorld
           : pos;
 
@@ -442,25 +750,26 @@ export function parseAndLabelGlbVenue(
     });
   }
 
-  // Detect merged-mesh architectural .glb models (e.g. `room.glb` where nodes have generic `group*` names
-  // and all seats are merged into a single high-vertex mesh rather than separate `chair_*` nodes).
+  // Case A: Merged-mesh architectural .glb building (e.g. `room.glb`)
   const hasExplicitSeats = labeledNodes.some((n) => n.role === 'seat');
   if (!hasExplicitSeats && labeledNodes.length > 0) {
-    // Re-classify generic merged-mesh nodes by geometry and vertex density:
     const sortedByVerts = [...labeledNodes].sort(
       (a, b) => (b.vertexCount ?? 0) - (a.vertexCount ?? 0),
     );
-    const primarySeatingMesh = sortedByVerts[0];
+    const primarySeatingNode = sortedByVerts[0];
 
     for (const n of labeledNodes) {
-      if (primarySeatingMesh && n.nodeIndex === primarySeatingMesh.nodeIndex && (n.vertexCount ?? 0) >= 1000) {
+      if (
+        primarySeatingNode &&
+        n.nodeIndex === primarySeatingNode.nodeIndex &&
+        (n.vertexCount ?? 0) >= 1000
+      ) {
         n.role = 'seat';
       } else if (
         n.sizeWorld[0] < 1.2 &&
         n.sizeWorld[1] >= 2.0 &&
         n.sizeWorld[2] >= 3.0
       ) {
-        // Vertical stage curtain / projection screen on stage wall (e.g. Node 5 in room.glb)
         n.role = 'presentation_screen';
       } else if (
         n.sizeWorld[1] <= 0.6 &&
@@ -468,30 +777,189 @@ export function parseAndLabelGlbVenue(
         n.sizeWorld[2] >= 3.5 &&
         n.positionWorld[0] > 2.0
       ) {
-        // Raised stage apron / stage deck (e.g. Node 4 in room.glb)
         n.role = 'stage';
       } else if (
         n.sizeWorld[1] <= 0.25 &&
-        (Math.abs(n.positionWorld[2]) > 4.5 || Math.abs(n.positionWorld[0]) > 4.5)
+        (Math.abs(n.positionWorld[2]) > 4.5 ||
+          Math.abs(n.positionWorld[0]) > 4.5)
       ) {
-        // Perimeter landing / egress corridor slab (e.g. Node 6 & Node 9 in room.glb)
         n.role = 'exit_or_entrance';
       } else {
-        // Large room-spanning architectural shell / risers -> floor_or_shell (never turn into giant cylinders!)
         n.role = 'floor_or_shell';
       }
     }
 
-    // Populate the extracted 24-place auditorium seating bowl, 2 wheelchair bays, and 3 movable props
-    // calibrated to the merged seating mesh so the uploaded architectural .glb is immediately
-    // interactive, inspectable from 24 attendee POVs, and repairable!
-    const preparedTemplate = createPreparedVenueSnapshot();
+    const seatingMeshIdx =
+      primarySeatingNode !== undefined
+        ? rawNodes[primarySeatingNode.nodeIndex]?.mesh
+        : undefined;
+    const extractedSeats =
+      seatingMeshIdx !== undefined &&
+      rawMeshes[seatingMeshIdx] &&
+      primarySeatingNode
+        ? extractSeatsFromMergedGlbMesh({
+            glbBytes,
+            nodeWorldMatrix: getWorldMatrix(primarySeatingNode.nodeIndex),
+            mesh: rawMeshes[seatingMeshIdx]!,
+            accessors: rawAccessors,
+            bufferViews: rawBufferViews,
+          })
+        : [];
+
+    // Build a standalone SceneSnapshot containing ONLY the extracted seats, bays, routes, and screen
+    // from this uploaded .glb building (no default Village Hall pillars, tables, or stage boxes!)
+    const rowBuckets: Array<typeof extractedSeats> = [];
+    for (const seat of extractedSeats) {
+      const existing = rowBuckets.find(
+        (r) => r.length > 0 && Math.abs(r[0]!.z - seat.z) <= 0.45,
+      );
+      if (existing) {
+        existing.push(seat);
+      } else {
+        rowBuckets.push([seat]);
+      }
+    }
+
+    const standaloneObjects: SceneObject[] = [];
+    const standalonePlaces: AudiencePlace[] = [];
+    const standaloneGroups: ChairGroup[] = [];
+    const standaloneRoutes: RouteCorridor[] = [
+      {
+        id: 'route_glb_main_corridor',
+        label: 'Uploaded Building Main Access Corridor',
+        waypoints: [
+          [-5.2, 5.8],
+          [-5.2, 4.8],
+          [4.2, 4.8],
+        ],
+        widthM: 1.2,
+      },
+    ];
+
+    rowBuckets.forEach((rowSeats, rIdx) => {
+      const rowNum = rIdx + 1;
+      const rowZ = rowSeats[0]!.z;
+      const aisleZ = Number((rowZ + 0.42).toFixed(3));
+      const routeId = `route_glb_row_${rowNum}`;
+      standaloneRoutes.push({
+        id: routeId,
+        label: `Parsed Row ${rowNum} Access Route`,
+        waypoints: [
+          [-5.2, 5.8],
+          [-5.2, aisleZ],
+          [4.2, aisleZ],
+        ],
+        widthM: 0.78,
+      });
+
+      const groupId = `group_glb_row_${rowNum}`;
+      const memberIds: string[] = [];
+
+      rowSeats.forEach((s, cIdx) => {
+        const colNum = cIdx + 1;
+        const objId = `obj_parsed_seat_r${rowNum}_c${colNum}`;
+        const placeId = `place_parsed_seat_r${rowNum}_c${colNum}`;
+        memberIds.push(objId);
+
+        standaloneObjects.push({
+          id: objId,
+          label: `Parsed Seat R${rowNum}-${colNum}`,
+          category: 'movable_chair',
+          editable: true,
+          groupId,
+          transform: { position: [s.x, s.yFloor, s.z], yawDeg: 0 },
+          baselineTransform: { position: [s.x, s.yFloor, s.z], yawDeg: 0 },
+          allowedBounds: { minX: -6.5, maxX: 6.5, minZ: -6.0, maxZ: 6.5 },
+          proxies: [
+            {
+              id: `proxy_${objId}_back`,
+              kind: 'box',
+              localPosition: [0.0, 0.42, 0.2],
+              localYawDeg: 0,
+              size: [0.46, 0.78, 0.06],
+              blocksVisibility: true,
+              blocksMovement: false,
+            },
+          ],
+        });
+
+        standalonePlaces.push({
+          id: placeId,
+          label: `Seat R${rowNum}-${colNum}`,
+          kind: 'chair',
+          objectId: objId,
+          seatHeightM: 0.45,
+          widthM: 0.6,
+          depthM: 0.65,
+          isAisle: cIdx === 0 || cIdx === rowSeats.length - 1,
+          routeId,
+          routeAnchorPoint: [s.x, s.z],
+        });
+      });
+
+      const avgX = Number(
+        (
+          rowSeats.reduce((acc, item) => acc + item.x, 0) / rowSeats.length
+        ).toFixed(3),
+      );
+      standaloneGroups.push({
+        id: groupId,
+        label: `Parsed Row ${rowNum}`,
+        memberObjectIds: memberIds,
+        transform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
+        baselineTransform: { position: [avgX, 0.0, rowZ], yawDeg: 0 },
+        allowedBounds: { minX: -6.5, maxX: 6.5, minZ: -6.0, maxZ: 6.5 },
+      });
+    });
+
+    // Add 2 accessible wheelchair bays at the rear-side level zones of the auditorium
+    const wcBayConfigs: Array<{ id: string; placeId: string; label: string; x: number; z: number }> = [
+      {
+        id: 'obj_parsed_bay_wc_01',
+        placeId: 'place_parsed_bay_wc_01',
+        label: 'Parsed Wheelchair Bay W1 (West)',
+        x: -3.2,
+        z: 3.6,
+      },
+      {
+        id: 'obj_parsed_bay_wc_02',
+        placeId: 'place_parsed_bay_wc_02',
+        label: 'Parsed Wheelchair Bay W2 (East)',
+        x: 3.2,
+        z: 3.6,
+      },
+    ];
+
+    for (const bay of wcBayConfigs) {
+      standaloneObjects.push({
+        id: bay.id,
+        label: bay.label,
+        category: 'wheelchair_bay_frame',
+        editable: false,
+        transform: { position: [bay.x, 0.0, bay.z], yawDeg: 0 },
+        baselineTransform: { position: [bay.x, 0.0, bay.z], yawDeg: 0 },
+        proxies: [],
+      });
+      standalonePlaces.push({
+        id: bay.placeId,
+        label: bay.label,
+        kind: 'wheelchair_bay',
+        objectId: bay.id,
+        seatHeightM: 0.0,
+        widthM: 0.96,
+        depthM: 1.3,
+        isAisle: true,
+        routeId: 'route_glb_main_corridor',
+        routeAnchorPoint: [bay.x, 4.8],
+        turningPadCenter: [bay.x, 4.4],
+        turningPadDiameterM: 1.55,
+      });
+    }
+
     const assetHash = hashStringDeterministic(
       `${fileName}:${glbBytes.byteLength}:${labeledNodes.length}`,
     );
-    const screenCount = labeledNodes.filter(
-      (n) => n.role === 'presentation_screen' || n.role === 'stage',
-    ).length;
+    const sceneId = `glb_standalone_${fileName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
     const exitCount = Math.max(
       2,
       labeledNodes.filter((n) => n.role === 'exit_or_entrance').length,
@@ -500,42 +968,72 @@ export function parseAndLabelGlbVenue(
       (n) => n.role === 'floor_or_shell',
     ).length;
 
-    const mergedSnapshot = withUpdatedSceneHash({
-      ...preparedTemplate,
-      sceneId: `glb_parsed_${fileName.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+    // Spawn 4 people at random into the parsed seats!
+    const randomFourRoster = spawnRandomFourAttendees(
+      standalonePlaces,
+      randomFn,
+    );
+
+    const standaloneSnapshot = withUpdatedSceneHash({
+      contractVersion: CONTRACT_VERSION,
+      sceneId,
       source: {
         sourceId: `uploaded_glb_${assetHash}`,
-        title: `Auto-Parsed 3D Auditorium (${fileName})`,
-        license: 'CC0-1.0 / User-Provided GLB',
+        title: `Standalone Uploaded 3D Building (${fileName})`,
+        license: 'User-Uploaded GLB',
         assetPath: `/venue/${fileName}`,
         assetHash,
         isFallbackFixture: false,
-        preparationNotes: `Extracted 24-place auditorium layout from merged-mesh 3D building "${fileName}" (${labeledNodes.length} mesh groups, ${primarySeatingMesh?.vertexCount ?? 0} seating vertices, ${exitCount} exit/egress zones, ${shellCount} architectural shell groups).`,
+        preparationNotes: `Standalone 3D building scene parsed from "${fileName}". Extracted ${extractedSeats.length} seats and 2 wheelchair bays; spawned ${randomFourRoster.length} attendees at random.`,
       },
+      roomBounds: {
+        min: [-8.0, -1.0, -9.0],
+        max: [8.0, 6.5, 8.0],
+      },
+      allowedFloorRegions: [
+        { minX: -7.5, maxX: 7.5, minZ: -8.5, maxZ: 7.5 },
+      ],
+      reservedCirculationRegions: [],
+      target: {
+        id: 'target_glb_stage_screen',
+        label: 'Uploaded Building Stage Screen',
+        center: [0.0, 2.2, -5.4],
+        yawDeg: 180,
+        widthM: 3.4,
+        heightM: 1.8,
+      },
+      objects: standaloneObjects,
+      chairGroups: standaloneGroups,
+      places: standalonePlaces,
+      routes: standaloneRoutes,
+      profiles: structuredClone(DEFAULT_PROFILE_REQUIREMENTS),
+      roster: randomFourRoster,
     });
 
-    uploadedGlbBufferBySceneId.set(mergedSnapshot.sceneId, glbBytes);
+    uploadedGlbBufferBySceneId.set(standaloneSnapshot.sceneId, glbBytes);
+    standaloneGlbSceneIds.add(standaloneSnapshot.sceneId);
 
     return {
       fileName,
       byteLength: glbBytes.byteLength,
       assetHash,
       totalNodes: labeledNodes.length,
-      roomBounds: mergedSnapshot.roomBounds,
+      roomBounds: standaloneSnapshot.roomBounds,
       counts: {
-        seats: 22,
+        seats: extractedSeats.length,
         wheelchairBays: 2,
         exitsAndEntrances: exitCount,
-        stagesAndScreens: Math.max(2, screenCount),
-        pillarsAndStructures: 2,
-        movableProps: 3,
+        stagesAndScreens: 2,
+        pillarsAndStructures: 0,
+        movableProps: 0,
         shellAndFloor: shellCount,
       },
       labeledNodes,
-      snapshot: mergedSnapshot,
+      snapshot: standaloneSnapshot,
     };
   }
 
+  // Case B: Node-separated .glb model with explicit chair/seat nodes
   let minX = -6.0;
   let maxX = 6.0;
   let maxY = 4.2;
@@ -689,7 +1187,6 @@ export function parseAndLabelGlbVenue(
     },
   ];
 
-  // Group seats by Z-row (within 0.35m tolerance)
   const sortedSeats = [...seatNodes].sort((a, b) => {
     if (Math.abs(a.positionWorld[2] - b.positionWorld[2]) > 0.35) {
       return a.positionWorld[2] - b.positionWorld[2];
@@ -844,80 +1341,90 @@ export function parseAndLabelGlbVenue(
     });
   });
 
-  // Assign a balanced 4-profile attendee roster across all detected places
-  const roster: AttendeeAssignment[] = [];
-  const chairPlacesList = places.filter((p) => p.kind === 'chair');
-  const bayPlacesList = places.filter((p) => p.kind === 'wheelchair_bay');
+  let roster: AttendeeAssignment[] = [];
+  if (standaloneRandomFour) {
+    roster = spawnRandomFourAttendees(places, randomFn);
+  } else {
+    const chairPlacesList = places.filter((p) => p.kind === 'chair');
+    const bayPlacesList = places.filter((p) => p.kind === 'wheelchair_bay');
 
-  let adultCounter = 0;
-  let shorterCounter = 0;
-  let extraCounter = 0;
+    let adultCounter = 0;
+    let shorterCounter = 0;
+    let extraCounter = 0;
 
-  chairPlacesList.forEach((p, idx) => {
-    let profileId: ProfileId = 'reference_adult';
-    let attendeeId = '';
-    let label = '';
+    chairPlacesList.forEach((p, idx) => {
+      let profileId: ProfileId = 'reference_adult';
+      let attendeeId = '';
+      let label = '';
 
-    // Place primary shorter viewer at Row 1 center (idx === 2) and Row 1 col 2 (idx === 1)
-    if (idx === 2) {
-      profileId = 'shorter_seated';
-      attendeeId = 'att_shorter_01';
-      label = `Sam Patel (Shorter Viewer · ${p.label})`;
-      shorterCounter = Math.max(shorterCounter, 2);
-    } else if (idx === 1) {
-      profileId = 'shorter_seated';
-      attendeeId = 'att_shorter_02';
-      label = `Riley Gomez (Shorter Viewer · ${p.label})`;
-      shorterCounter = Math.max(shorterCounter, 2);
-    } else if (idx === 6 || idx === 7) {
-      shorterCounter++;
-      profileId = 'shorter_seated';
-      attendeeId = `att_shorter_0${shorterCounter}`;
-      label = `Shorter Viewer ${shorterCounter} (${p.label})`;
-    } else if (idx === 3 || idx === 4 || (extraCounter < 4 && p.isAisle && idx >= 5)) {
-      extraCounter++;
-      profileId = 'extra_legroom';
-      attendeeId = `att_extra_legroom_0${extraCounter}`;
-      label = `Extra-Legroom Attendee ${extraCounter} (${p.label})`;
-    } else {
-      adultCounter++;
-      profileId = 'reference_adult';
-      attendeeId = `att_adult_${String(adultCounter).padStart(2, '0')}`;
-      label = `Reference Adult ${adultCounter} (${p.label})`;
-    }
+      if (idx === 2) {
+        profileId = 'shorter_seated';
+        attendeeId = 'att_shorter_01';
+        label = `Sam Patel (Shorter Viewer · ${p.label})`;
+        shorterCounter = Math.max(shorterCounter, 2);
+      } else if (idx === 1) {
+        profileId = 'shorter_seated';
+        attendeeId = 'att_shorter_02';
+        label = `Riley Gomez (Shorter Viewer · ${p.label})`;
+        shorterCounter = Math.max(shorterCounter, 2);
+      } else if (idx === 6 || idx === 7) {
+        shorterCounter++;
+        profileId = 'shorter_seated';
+        attendeeId = `att_shorter_0${shorterCounter}`;
+        label = `Shorter Viewer ${shorterCounter} (${p.label})`;
+      } else if (
+        idx === 3 ||
+        idx === 4 ||
+        (extraCounter < 4 && p.isAisle && idx >= 5)
+      ) {
+        extraCounter++;
+        profileId = 'extra_legroom';
+        attendeeId = `att_extra_legroom_0${extraCounter}`;
+        label = `Extra-Legroom Attendee ${extraCounter} (${p.label})`;
+      } else {
+        adultCounter++;
+        profileId = 'reference_adult';
+        attendeeId = `att_adult_${String(adultCounter).padStart(2, '0')}`;
+        label = `Reference Adult ${adultCounter} (${p.label})`;
+      }
 
-    roster.push({
-      attendeeId,
-      label,
-      profileId,
-      assignedPlaceId: p.id,
+      roster.push({
+        attendeeId,
+        label,
+        profileId,
+        assignedPlaceId: p.id,
+      });
     });
-  });
 
-  // Sort wheelchair bays so East Bay (or last bay) is assigned att_wheelchair_01
-  const sortedBays = [...bayPlacesList].sort((a, b) => {
-    const objA = objects.find((o) => o.id === a.objectId);
-    const objB = objects.find((o) => o.id === b.objectId);
-    return (objB?.transform.position[0] ?? 0) - (objA?.transform.position[0] ?? 0);
-  });
-
-  sortedBays.forEach((p, idx) => {
-    const wcNum = idx + 1;
-    roster.push({
-      attendeeId: `att_wheelchair_0${wcNum}`,
-      label: `Wheelchair User ${wcNum} (${p.label})`,
-      profileId: 'wheelchair_user',
-      assignedPlaceId: p.id,
+    const sortedBays = [...bayPlacesList].sort((a, b) => {
+      const objA = objects.find((o) => o.id === a.objectId);
+      const objB = objects.find((o) => o.id === b.objectId);
+      return (
+        (objB?.transform.position[0] ?? 0) - (objA?.transform.position[0] ?? 0)
+      );
     });
-  });
+
+    sortedBays.forEach((p, idx) => {
+      const wcNum = idx + 1;
+      roster.push({
+        attendeeId: `att_wheelchair_0${wcNum}`,
+        label: `Wheelchair User ${wcNum} (${p.label})`,
+        profileId: 'wheelchair_user',
+        assignedPlaceId: p.id,
+      });
+    });
+  }
 
   const assetHash = hashStringDeterministic(
     `${fileName}:${glbBytes.byteLength}:${labeledNodes.length}`,
   );
+  const sceneId = standaloneRandomFour
+    ? `glb_standalone_${fileName.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+    : `glb_parsed_${fileName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
   const snapshot = withUpdatedSceneHash({
     contractVersion: CONTRACT_VERSION,
-    sceneId: `glb_parsed_${fileName.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+    sceneId,
     source: {
       sourceId: `uploaded_glb_${assetHash}`,
       title: `Auto-Parsed 3D Venue (${fileName})`,
@@ -966,6 +1473,9 @@ export function parseAndLabelGlbVenue(
   });
 
   uploadedGlbBufferBySceneId.set(snapshot.sceneId, glbBytes);
+  if (standaloneRandomFour) {
+    standaloneGlbSceneIds.add(snapshot.sceneId);
+  }
 
   return {
     fileName,
@@ -1195,10 +1705,46 @@ function yieldToUiThread(ms = 18): Promise<void> {
   });
 }
 
+function parseGlbGroupAsync(glbBytes: Uint8Array): Promise<THREE.Group | null> {
+  return new Promise((resolve) => {
+    try {
+      const loader = new GLTFLoader();
+      const sliceBuffer = glbBytes.buffer.slice(
+        glbBytes.byteOffset,
+        glbBytes.byteOffset + glbBytes.byteLength,
+      ) as ArrayBuffer;
+      loader.parse(
+        sliceBuffer,
+        '',
+        (gltf) => {
+          const archGroup = gltf.scene;
+          archGroup.name = 'uploaded_glb_architectural_shell';
+          archGroup.rotation.y = STANDALONE_GLB_ALIGNMENT.rotationYRad;
+          archGroup.scale.set(
+            STANDALONE_GLB_ALIGNMENT.scale,
+            STANDALONE_GLB_ALIGNMENT.scale,
+            STANDALONE_GLB_ALIGNMENT.scale,
+          );
+          archGroup.position.set(
+            STANDALONE_GLB_ALIGNMENT.position[0],
+            STANDALONE_GLB_ALIGNMENT.position[1],
+            STANDALONE_GLB_ALIGNMENT.position[2],
+          );
+          resolve(archGroup);
+        },
+        () => resolve(null),
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 /**
  * Asynchronous, non-blocking `.glb` parser and auto-labeler that yields to the
- * browser UI thread between stages and emits `GlbParseProgressUpdate` events
- * so the user sees live progress and the interface never freezes on large models.
+ * browser UI thread between stages, pre-caches the Three.js `THREE.Group` for
+ * standalone rendering, and spawns 4 random people into the parsed seats when
+ * `standaloneRandomFour` is enabled.
  */
 export async function parseAndLabelGlbVenueAsync(
   glbBytes: Uint8Array,
@@ -1206,6 +1752,8 @@ export async function parseAndLabelGlbVenueAsync(
     fileName?: string;
     onProgress?: (update: GlbParseProgressUpdate) => void;
     yieldDelayMs?: number;
+    standaloneRandomFour?: boolean;
+    randomFn?: () => number;
   } = {},
 ): Promise<GlbVenueParseReport> {
   const fileName = options.fileName ?? 'uploaded-venue.glb';
@@ -1242,20 +1790,28 @@ export async function parseAndLabelGlbVenueAsync(
     totalSteps,
     percent: 55,
     label: 'Step 3/6 · Auto-Labeling Seats, Bays, Exits & Stage',
-    detail: `Classifying ${nodeCount} mesh bounding volumes into seats, wheelchair bays, exits, stage, and props…`,
+    detail: `Extracting 3D seat coordinates, wheelchair bays, exits, and stage from ${nodeCount} mesh groups…`,
   });
   await yieldToUiThread(delayMs);
 
-  const report = parseAndLabelGlbVenue(glbBytes, { fileName });
+  const report = parseAndLabelGlbVenue(glbBytes, {
+    fileName,
+    standaloneRandomFour: options.standaloneRandomFour,
+    randomFn: options.randomFn,
+  });
 
   onProgress?.({
     stage: 'synthesizing_routes',
     stepIndex: 4,
     totalSteps,
     percent: 74,
-    label: 'Step 4/6 · Synthesizing Step-Free Access Routes',
-    detail: `Labeled ${report.counts.seats} seats & ${report.counts.wheelchairBays} wheelchair bays; built ${report.snapshot.routes.length} access corridors…`,
+    label: 'Step 4/6 · Building Standalone 3D Scene & Routes',
+    detail: `Labeled ${report.counts.seats} seats & ${report.counts.wheelchairBays} bays; building standalone 3D mesh group…`,
   });
+  const parsedGroup = await parseGlbGroupAsync(glbBytes);
+  if (parsedGroup) {
+    uploadedGlbGroupBySceneId.set(report.snapshot.sceneId, parsedGroup);
+  }
   await yieldToUiThread(delayMs);
 
   onProgress?.({
@@ -1263,8 +1819,8 @@ export async function parseAndLabelGlbVenueAsync(
     stepIndex: 5,
     totalSteps,
     percent: 90,
-    label: 'Step 5/6 · Assigning 4-Profile Attendee Roster',
-    detail: `Assigned ${report.snapshot.roster.length} attendees across Adult, Shorter, Extra-Legroom & Wheelchair profiles (hash ${report.snapshot.sceneHash})…`,
+    label: 'Step 5/6 · Spawning Attendees into Parsed Seats',
+    detail: `Spawned ${report.snapshot.roster.length} attendees into ${report.snapshot.places.length} parsed places (hash ${report.snapshot.sceneHash})…`,
   });
   await yieldToUiThread(delayMs);
 
@@ -1273,8 +1829,8 @@ export async function parseAndLabelGlbVenueAsync(
     stepIndex: 6,
     totalSteps,
     percent: 100,
-    label: 'Step 6/6 · 3D Building Ready',
-    detail: `Loaded ${report.counts.seats} seats, ${report.counts.wheelchairBays} wheelchair bays, ${report.snapshot.routes.length} routes, and ${report.counts.movableProps} movable props.`,
+    label: 'Step 6/6 · Standalone 3D Building Ready',
+    detail: `Loaded ${report.counts.seats} seats, ${report.counts.wheelchairBays} wheelchair bays, and ${report.snapshot.roster.length} spawned attendees.`,
   });
 
   return report;

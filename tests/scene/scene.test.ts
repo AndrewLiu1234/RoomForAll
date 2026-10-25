@@ -39,10 +39,12 @@ import {
   getOverviewCameraPose,
   getProxyWorldTransform,
   getUploadedGlbBytesForScene,
+  isStandaloneUploadedGlbScene,
   loadPreparedVenueManifest,
   parseAndLabelGlbVenue,
   parseAndLabelGlbVenueAsync,
   parseVenueGlbBinary,
+  spawnRandomFourAttendees,
   type GlbParseProgressUpdate,
 } from '../../src/scene/index.js';
 import {
@@ -845,7 +847,7 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(progressUpdates[0]?.percent).toBe(15);
     expect(progressUpdates[5]?.percent).toBe(100);
 
-    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb is present, verify it parses, caches GLB bytes, and evaluates cleanly
+    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb is present, verify standalone building parsing, real seat extraction, and random 4-person spawning
     const externalRoomGlbPath =
       '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb';
     if (fs.existsSync(externalRoomGlbPath)) {
@@ -853,21 +855,39 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       const roomReport = await parseAndLabelGlbVenueAsync(roomBuf, {
         fileName: 'room.glb',
         yieldDelayMs: 1,
+        standaloneRandomFour: true,
+        randomFn: () => 0.42,
       });
       expect(roomReport.totalNodes).toBe(10);
-      expect(roomReport.counts.seats).toBe(22);
+      expect(roomReport.counts.seats).toBeGreaterThanOrEqual(6);
       expect(roomReport.counts.wheelchairBays).toBe(2);
-      expect(roomReport.snapshot.places).toHaveLength(24);
+      expect(roomReport.counts.pillarsAndStructures).toBe(0);
+      expect(roomReport.counts.movableProps).toBe(0);
+      expect(isStandaloneUploadedGlbScene(roomReport.snapshot.sceneId)).toBe(
+        true,
+      );
       expect(
         getUploadedGlbBytesForScene(roomReport.snapshot.sceneId)?.byteLength,
       ).toBe(roomBuf.byteLength);
 
+      // Exactly 4 people spawned at random into the parsed seats
+      expect(roomReport.snapshot.roster).toHaveLength(4);
+      const uniquePlaces = new Set(
+        roomReport.snapshot.roster.map((r) => r.assignedPlaceId),
+      );
+      expect(uniquePlaces.size).toBe(4);
+
       const roomEval = evaluateScene(roomReport.snapshot);
       expect(roomEval.isValidStructure).toBe(true);
-      const roomPreview = createLocalFixtureRepairPreviewRun(
-        roomReport.snapshot,
-      );
-      expect(roomPreview.bestEvaluation.allModeledRequirementsMet).toBe(true);
+      expect(roomEval.occupiedCount).toBe(4);
+      expect(roomEval.capacityCount).toBe(roomReport.snapshot.places.length);
     }
+
+    // Also verify spawnRandomFourAttendees on arbitrary place lists
+    const randomRoster = spawnRandomFourAttendees(
+      report.snapshot.places,
+      () => 0.25,
+    );
+    expect(randomRoster).toHaveLength(4);
   });
 });

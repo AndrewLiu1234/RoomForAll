@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDevFixtureSnapshot,
+  withUpdatedSceneHash,
   type CaptureTourSpec,
   type Evaluation,
   type EvidenceFinding,
@@ -13,6 +14,7 @@ import {
   createPreparedVenueSnapshot,
   generateSampleCustomAuditoriumGlb,
   parseAndLabelGlbVenueAsync,
+  spawnRandomFourAttendees,
   type GlbParseProgressUpdate,
   type GlbVenueParseReport,
 } from './scene/index.js';
@@ -30,6 +32,7 @@ import {
   postPreview,
   uploadRunEvidence,
   type VenuePresetMode,
+  type ViewportCameraMode,
 } from './ui/index.js';
 
 export function App(): React.ReactElement {
@@ -57,9 +60,7 @@ export function App(): React.ReactElement {
       '',
   );
 
-  const [viewMode, setViewMode] = useState<'overview' | 'attendee_pov'>(
-    'overview',
-  );
+  const [viewMode, setViewMode] = useState<ViewportCameraMode>('overview');
   const [showSightlineOverlays, setShowSightlineOverlays] =
     useState<boolean>(true);
   const [viewingStage, setViewingStage] = useState<'baseline' | 'best'>(
@@ -358,6 +359,7 @@ export function App(): React.ReactElement {
       const report = await parseAndLabelGlbVenueAsync(buf, {
         fileName: file.name,
         yieldDelayMs: 110,
+        standaloneRandomFour: true,
         onProgress: (upd) => setGlbParseProgress(upd),
       });
       setGlbParseReport(report);
@@ -367,7 +369,7 @@ export function App(): React.ReactElement {
       setActiveRun(null);
       setViewingStage('baseline');
       setCaptureStatusText(
-        `Parsed uploaded 3D building "${file.name}": labeled ${report.counts.seats} seats, ${report.counts.wheelchairBays} wheelchair bays, and ${report.snapshot.routes.length} access routes.`,
+        `Loaded standalone 3D building "${file.name}": parsed ${report.counts.seats} seats & ${report.counts.wheelchairBays} wheelchair bays, and spawned ${report.snapshot.roster.length} people at random. Use WASD+E/C to fly through or add/remove people in seats!`,
       );
       setSelectedAttendeeId(
         report.snapshot.roster.find((a) => a.attendeeId === 'att_shorter_01')
@@ -383,6 +385,103 @@ export function App(): React.ReactElement {
           : 'Failed to parse uploaded .glb file.',
       );
     }
+  };
+
+  const handleAddAttendee = (
+    placeId: string,
+    requestedProfileId?: ProfileId,
+  ): void => {
+    if (isFrozen) return;
+    const place = baselineSnapshot.places.find((p) => p.id === placeId);
+    if (!place) return;
+    if (baselineSnapshot.roster.some((m) => m.assignedPlaceId === placeId)) {
+      return;
+    }
+
+    const defaultProfile: ProfileId =
+      place.kind === 'wheelchair_bay' ? 'wheelchair_user' : 'reference_adult';
+    const profileId =
+      requestedProfileId &&
+      baselineSnapshot.profiles[requestedProfileId]?.compatiblePlaceKinds.includes(
+        place.kind,
+      )
+        ? requestedProfileId
+        : defaultProfile;
+
+    const existingNums = baselineSnapshot.roster.map((m) => {
+      const match = m.attendeeId.match(/(\d+)$/);
+      return match ? Number(match[1]) : 0;
+    });
+    const nextNum = Math.max(0, ...existingNums) + 1;
+    const prefix =
+      profileId === 'shorter_seated'
+        ? 'att_shorter'
+        : profileId === 'extra_legroom'
+          ? 'att_extra_legroom'
+          : profileId === 'wheelchair_user'
+            ? 'att_wheelchair'
+            : 'att_adult';
+    const attendeeId = `${prefix}_${String(nextNum).padStart(2, '0')}`;
+    const profileLabel =
+      baselineSnapshot.profiles[profileId]?.label ?? profileId;
+
+    const updatedSnap = withUpdatedSceneHash({
+      ...baselineSnapshot,
+      roster: [
+        ...baselineSnapshot.roster,
+        {
+          attendeeId,
+          label: `Guest ${nextNum} (${profileLabel} · ${place.label})`,
+          profileId,
+          assignedPlaceId: place.id,
+        },
+      ],
+    });
+
+    setBaselineSnapshot(updatedSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(updatedSnap));
+    setSelectedAttendeeId(attendeeId);
+    setCaptureStatusText(
+      `Added Guest ${nextNum} (${profileLabel}) to ${place.label}.`,
+    );
+  };
+
+  const handleRemoveAttendee = (attendeeId: string): void => {
+    if (isFrozen) return;
+    const updatedRoster = baselineSnapshot.roster.filter(
+      (m) => m.attendeeId !== attendeeId,
+    );
+    const updatedSnap = withUpdatedSceneHash({
+      ...baselineSnapshot,
+      roster: updatedRoster,
+    });
+    setBaselineSnapshot(updatedSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(updatedSnap));
+    if (selectedAttendeeId === attendeeId) {
+      const nextSelected = updatedRoster[0]?.attendeeId ?? '';
+      setSelectedAttendeeId(nextSelected);
+      if (!nextSelected && viewMode === 'attendee_pov') {
+        setViewMode('overview');
+      }
+    }
+    setCaptureStatusText(
+      `Removed attendee ${attendeeId} (${updatedRoster.length} of ${updatedSnap.places.length} seats occupied).`,
+    );
+  };
+
+  const handleRandomizeFourAttendees = (): void => {
+    if (isFrozen) return;
+    const randomRoster = spawnRandomFourAttendees(baselineSnapshot.places);
+    const updatedSnap = withUpdatedSceneHash({
+      ...baselineSnapshot,
+      roster: randomRoster,
+    });
+    setBaselineSnapshot(updatedSnap);
+    setBaselineEvaluation(evaluateSceneWithFallback(updatedSnap));
+    setSelectedAttendeeId(randomRoster[0]?.attendeeId ?? '');
+    setCaptureStatusText(
+      `Spawned ${randomRoster.length} people at random across ${updatedSnap.places.length} parsed seats.`,
+    );
   };
 
   const handlePreviewLocalRepair = (): void => {
@@ -440,6 +539,9 @@ export function App(): React.ReactElement {
           void handleChangePlaceAssignment(attId, placeId)
         }
         onOpenProfileEditor={() => setIsProfileModalOpen(true)}
+        onAddAttendee={handleAddAttendee}
+        onRemoveAttendee={handleRemoveAttendee}
+        onRandomizeFourAttendees={handleRandomizeFourAttendees}
       />
 
       <main
@@ -463,6 +565,10 @@ export function App(): React.ReactElement {
           onToggleSightlineOverlays={() =>
             setShowSightlineOverlays((prev) => !prev)
           }
+          onAddAttendeeAtPlace={
+            !isFrozen ? (placeId) => handleAddAttendee(placeId) : undefined
+          }
+          onRemoveAttendee={!isFrozen ? handleRemoveAttendee : undefined}
         />
       </main>
 

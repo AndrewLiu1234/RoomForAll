@@ -9,10 +9,14 @@ import {
   type CaptureTourSpec,
   type CapturedEvidencePayload,
   type EvidenceManifest,
+  type ProfileId,
   type SceneSnapshot,
 } from '../shared/index.js';
-import { captureEvidence as streamACaptureEvidence } from '../scene/index.js';
-
+import {
+  captureEvidence as streamACaptureEvidence,
+  getUploadedGlbGroupForScene,
+  isStandaloneUploadedGlbScene,
+} from '../scene/index.js';
 /**
  * Builds default tour keyframes (overview + representative attendee POVs) when the server's
  * pendingCapture has an empty keyframe list.
@@ -96,89 +100,98 @@ export function populateThreeSceneFromSnapshot(
   fillLight.position.set(-5, 4, -4);
   scene.add(fillLight);
 
-  // Room floor
-  const roomWidth = snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0];
-  const roomDepth = snapshot.roomBounds.max[2] - snapshot.roomBounds.min[2];
-  const roomCenterX =
-    (snapshot.roomBounds.min[0] + snapshot.roomBounds.max[0]) * 0.5;
-  const roomCenterZ =
-    (snapshot.roomBounds.min[2] + snapshot.roomBounds.max[2]) * 0.5;
+  const isStandaloneGlb = isStandaloneUploadedGlbScene(snapshot.sceneId);
+  const standaloneGlbGroup = isStandaloneGlb
+    ? getUploadedGlbGroupForScene(snapshot.sceneId)
+    : undefined;
 
-  const floorGeo = new THREE.PlaneGeometry(roomWidth, roomDepth);
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x161b28,
-    roughness: 0.9,
-    metalness: 0.05,
-  });
-  const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-  floorMesh.rotation.x = -Math.PI / 2;
-  floorMesh.position.set(roomCenterX, 0, roomCenterZ);
-  scene.add(floorMesh);
+  if (standaloneGlbGroup) {
+    scene.add(standaloneGlbGroup.clone(true));
+  } else if (!isStandaloneGlb) {
+    // Room floor
+    const roomWidth = snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0];
+    const roomDepth = snapshot.roomBounds.max[2] - snapshot.roomBounds.min[2];
+    const roomCenterX =
+      (snapshot.roomBounds.min[0] + snapshot.roomBounds.max[0]) * 0.5;
+    const roomCenterZ =
+      (snapshot.roomBounds.min[2] + snapshot.roomBounds.max[2]) * 0.5;
 
-  const gridHelper = new THREE.GridHelper(
-    Math.max(roomWidth, roomDepth),
-    Math.round(Math.max(roomWidth, roomDepth) * 2),
-    0x2a324b,
-    0x1e2436,
-  );
-  gridHelper.position.set(roomCenterX, 0.003, roomCenterZ);
-  scene.add(gridHelper);
+    const floorGeo = new THREE.PlaneGeometry(roomWidth, roomDepth);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x161b28,
+      roughness: 0.9,
+      metalness: 0.05,
+    });
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.position.set(roomCenterX, 0, roomCenterZ);
+    scene.add(floorMesh);
 
-  // Reserved circulation / main route corridors on floor
-  for (const reg of snapshot.reservedCirculationRegions) {
-    const w = reg.maxX - reg.minX;
-    const d = reg.maxZ - reg.minZ;
-    const cx = (reg.minX + reg.maxX) * 0.5;
-    const cz = (reg.minZ + reg.maxZ) * 0.5;
-    const corrGeo = new THREE.PlaneGeometry(w, d);
-    const corrMat = new THREE.MeshBasicMaterial({
-      color: 0x1e3a5f,
-      transparent: true,
-      opacity: 0.28,
+    const gridHelper = new THREE.GridHelper(
+      Math.max(roomWidth, roomDepth),
+      Math.round(Math.max(roomWidth, roomDepth) * 2),
+      0x2a324b,
+      0x1e2436,
+    );
+    gridHelper.position.set(roomCenterX, 0.003, roomCenterZ);
+    scene.add(gridHelper);
+
+    // Reserved circulation / main route corridors on floor
+    for (const reg of snapshot.reservedCirculationRegions) {
+      const w = reg.maxX - reg.minX;
+      const d = reg.maxZ - reg.minZ;
+      const cx = (reg.minX + reg.maxX) * 0.5;
+      const cz = (reg.minZ + reg.maxZ) * 0.5;
+      const corrGeo = new THREE.PlaneGeometry(w, d);
+      const corrMat = new THREE.MeshBasicMaterial({
+        color: 0x1e3a5f,
+        transparent: true,
+        opacity: 0.28,
+        side: THREE.DoubleSide,
+      });
+      const corrMesh = new THREE.Mesh(corrGeo, corrMat);
+      corrMesh.rotation.x = -Math.PI / 2;
+      corrMesh.position.set(cx, 0.008, cz);
+      scene.add(corrMesh);
+    }
+
+    // Presentation Target Screen
+    const target = snapshot.target;
+    const screenGroup = new THREE.Group();
+    screenGroup.position.set(
+      target.center[0],
+      target.center[1],
+      target.center[2],
+    );
+    screenGroup.rotation.y = target.yawDeg * DEG_TO_RAD;
+
+    // Frame
+    const frameGeo = new THREE.BoxGeometry(
+      target.widthM + 0.16,
+      target.heightM + 0.16,
+      0.06,
+    );
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.5,
+    });
+    const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+    frameMesh.position.set(0, 0, -0.04);
+    screenGroup.add(frameMesh);
+
+    // Illuminated screen surface
+    const panelGeo = new THREE.PlaneGeometry(target.widthM, target.heightM);
+    const panelMat = new THREE.MeshStandardMaterial({
+      color: 0xe0f2fe,
+      emissive: 0x1d4ed8,
+      emissiveIntensity: 0.35,
+      roughness: 0.3,
       side: THREE.DoubleSide,
     });
-    const corrMesh = new THREE.Mesh(corrGeo, corrMat);
-    corrMesh.rotation.x = -Math.PI / 2;
-    corrMesh.position.set(cx, 0.008, cz);
-    scene.add(corrMesh);
+    const panelMesh = new THREE.Mesh(panelGeo, panelMat);
+    screenGroup.add(panelMesh);
+    scene.add(screenGroup);
   }
-
-  // Presentation Target Screen
-  const target = snapshot.target;
-  const screenGroup = new THREE.Group();
-  screenGroup.position.set(
-    target.center[0],
-    target.center[1],
-    target.center[2],
-  );
-  screenGroup.rotation.y = target.yawDeg * DEG_TO_RAD;
-
-  // Frame
-  const frameGeo = new THREE.BoxGeometry(
-    target.widthM + 0.16,
-    target.heightM + 0.16,
-    0.06,
-  );
-  const frameMat = new THREE.MeshStandardMaterial({
-    color: 0x334155,
-    roughness: 0.5,
-  });
-  const frameMesh = new THREE.Mesh(frameGeo, frameMat);
-  frameMesh.position.set(0, 0, -0.04);
-  screenGroup.add(frameMesh);
-
-  // Illuminated screen surface
-  const panelGeo = new THREE.PlaneGeometry(target.widthM, target.heightM);
-  const panelMat = new THREE.MeshStandardMaterial({
-    color: 0xe0f2fe,
-    emissive: 0x1d4ed8,
-    emissiveIntensity: 0.35,
-    roughness: 0.3,
-    side: THREE.DoubleSide,
-  });
-  const panelMesh = new THREE.Mesh(panelGeo, panelMat);
-  screenGroup.add(panelMesh);
-  scene.add(screenGroup);
 
   // Determine which object belongs to `hideAttendeeId` so we exclude the viewer's own chair/body in POV mode
   let hiddenObjectId: string | undefined;
@@ -200,9 +213,17 @@ export function populateThreeSceneFromSnapshot(
     }
   }
 
-  // Render SceneObjects & Proxies
+  // Render SceneObjects & Proxies (skip duplicate procedural chairs/stage/pillars when standaloneGlb is active!)
   for (const obj of snapshot.objects) {
     if (obj.id === hiddenObjectId) continue;
+    if (
+      isStandaloneGlb &&
+      (obj.category === 'movable_chair' ||
+        obj.category === 'stage' ||
+        obj.category === 'fixed_structure')
+    ) {
+      continue;
+    }
 
     const assignedAttendeeId = objectToAttendeeId.get(obj.id);
     const group = new THREE.Group();
