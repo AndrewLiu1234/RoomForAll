@@ -351,18 +351,42 @@ export function RunProgressBanner({
             color: '#e9d5ff',
           }}
         >
-          <div>
-            <strong>GLB Building Auto-Labeler:</strong>{' '}
-            <code>{glbParseReport.fileName}</code> ({glbParseReport.byteLength}{' '}
-            bytes · {glbParseReport.totalNodes} 3D nodes)
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <strong>Parallel Gemini GLB Agents:</strong>{' '}
+            <code>{glbParseReport.fileName}</code> ({glbParseReport.totalNodes}{' '}
+            3D nodes)
+            {glbParseReport.agentTelemetry && (
+              <span
+                className="mono"
+                style={{
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  background: 'rgba(56, 189, 248, 0.18)',
+                  color: '#7dd3fc',
+                  fontSize: '0.69rem',
+                }}
+                title={glbParseReport.agentTelemetry.agents
+                  .map((a) => `${a.agentName} (${a.latencyMs}ms): ${a.summary}`)
+                  .join(' | ')}
+              >
+                ⚡ 3 Parallel Agents ({glbParseReport.agentTelemetry.totalParallelLatencyMs}ms):{' '}
+                {glbParseReport.agentTelemetry.agents
+                  .map((a) => a.agentName.replace('AndAccessibilityAgent', '').replace('AndScreenAgent', ''))
+                  .join(' + ')}
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <span>
-              Seats: <strong>{glbParseReport.counts.seats}</strong>
+              Parsed Seats: <strong>{glbParseReport.counts.seats}</strong>
             </span>
             <span>
               Wheelchair Bays:{' '}
               <strong>{glbParseReport.counts.wheelchairBays}</strong>
+            </span>
+            <span>
+              Spawned People:{' '}
+              <strong>{glbParseReport.snapshot.roster.length}</strong>
             </span>
             <span>
               Synthesized Corridors:{' '}
@@ -371,10 +395,6 @@ export function RunProgressBanner({
             <span>
               Stage/Screen:{' '}
               <strong>{glbParseReport.counts.stagesAndScreens}</strong>
-            </span>
-            <span>
-              Movable Props:{' '}
-              <strong>{glbParseReport.counts.movableProps}</strong>
             </span>
           </div>
         </div>

@@ -42,8 +42,10 @@ export {
   spawnRandomFourAttendees,
   type AutoLabeledGlbNode,
   type AutoLabeledNodeRole,
+  type GlbParallelAgentTelemetry,
   type GlbParseProgressUpdate,
   type GlbParseStage,
+  type GlbSubAgentSummary,
   type GlbVenueParseReport,
 } from './glbAutoLabeler.js';
 

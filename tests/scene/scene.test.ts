@@ -870,6 +870,17 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
         getUploadedGlbBytesForScene(roomReport.snapshot.sceneId)?.byteLength,
       ).toBe(roomBuf.byteLength);
 
+      // Verify parallel multi-agent telemetry (SeatClusterAgent + StageAndScreenAgent + EgressAndAccessibilityAgent)
+      expect(roomReport.agentTelemetry).toBeDefined();
+      expect(roomReport.agentTelemetry?.agents).toHaveLength(3);
+      expect(roomReport.agentTelemetry?.agents.map((a) => a.agentName)).toEqual(
+        [
+          'SeatClusterAgent',
+          'StageAndScreenAgent',
+          'EgressAndAccessibilityAgent',
+        ],
+      );
+
       // Exactly 4 people spawned at random into the parsed seats
       expect(roomReport.snapshot.roster).toHaveLength(4);
       const uniquePlaces = new Set(
