@@ -262,7 +262,8 @@ export function createLocalFixtureRepairPreviewRun(
 
   // Generic bounded coordinate-search solver for arbitrary uploaded .glb venues
   if (!hasDevSign) {
-    const candidateDeltas: Array<[number, 0, number]> = [
+    const candidateDeltas: Array<[number, number, number]> = [
+      [0, -0.4, 0], // Remove / clear blocking Flaw_* or Obs_* obstruction
       [-0.6, 0, 0],
       [0.6, 0, 0],
       [-0.55, 0, 0],
@@ -274,9 +275,9 @@ export function createLocalFixtureRepairPreviewRun(
       [-0.6, 0, 0.55],
       [0.6, 0, 0.55],
     ];
-    const editableProps = baselineSnapshot.objects
-      .filter((o) => o.editable && o.category === 'movable_prop')
-      .slice(0, 4);
+    const editableProps = baselineSnapshot.objects.filter(
+      (o) => o.editable && o.category === 'movable_prop',
+    );
 
     // Also include any occupied chairs whose attendee currently has an obstructed view or failed requirement
     const obstructedChairObjs = baselineSnapshot.roster
@@ -294,21 +295,22 @@ export function createLocalFixtureRepairPreviewRun(
       })
       .filter((o): o is NonNullable<typeof o> => Boolean(o && o.editable));
 
-    const candidateTargets = [...editableProps, ...obstructedChairObjs].slice(
-      0,
-      6,
-    );
+    const candidateTargets = [...editableProps, ...obstructedChairObjs];
 
     const ops: LayoutPatch['operations'] = [];
     let currentSnap = baselineSnapshot;
     let currentEval = baselineEvaluation;
 
     for (const targetObj of candidateTargets) {
+      if (ops.length >= 6) break;
       let bestTargetOp: LayoutPatch['operations'][number] | null = null;
       let bestTargetSnap = currentSnap;
       let bestTargetEval = currentEval;
 
       for (const delta of candidateDeltas) {
+        // Only apply vertical removal [0, -0.4, 0] to movable_prop obstructions
+        if (delta[1] < 0 && targetObj.category !== 'movable_prop') continue;
+        const isRemoval = delta[1] < -0.15;
         const trialPatch: LayoutPatch = {
           contractVersion: CONTRACT_VERSION,
           runId: 'preview_custom_glb',
@@ -320,7 +322,9 @@ export function createLocalFixtureRepairPreviewRun(
               targetId: targetObj.id,
               deltaPositionM: delta,
               deltaYawDeg: 0,
-              reason: `Relocate ${targetObj.id} by [${delta.join(', ')}]m to clear sightline and egress corridors.`,
+              reason: isRemoval
+                ? `Remove blocking obstruction ${targetObj.id} to clear sightlines and egress corridors.`
+                : `Relocate ${targetObj.id} by [${delta.join(', ')}]m to clear sightline and egress corridors.`,
             },
           ],
           summary: `Auto-repaired ${targetObj.id}.`,
@@ -337,6 +341,7 @@ export function createLocalFixtureRepairPreviewRun(
             bestTargetOp = trialPatch.operations[0]!;
             bestTargetSnap = val.snapshot;
             bestTargetEval = nextEval;
+            if (isRemoval) break; // Prefer complete obstruction removal when it improves sightlines!
           }
         }
       }
@@ -345,6 +350,42 @@ export function createLocalFixtureRepairPreviewRun(
         ops.push(bestTargetOp);
         currentSnap = bestTargetSnap;
         currentEval = bestTargetEval;
+      }
+    }
+
+    // Also clear any remaining Flaw_* or Obs_* visual/aisle clutter within the 6-operation patch budget
+    const targetedSet = new Set(ops.map((o) => o.targetId));
+    for (const prop of editableProps) {
+      if (ops.length >= 6) break;
+      if (targetedSet.has(prop.id)) continue;
+      const lower = prop.id.toLowerCase();
+      if (lower.includes('flaw') || lower.startsWith('obs_')) {
+        const removalOp: LayoutPatch['operations'][number] = {
+          targetType: 'object',
+          targetId: prop.id,
+          deltaPositionM: [0, -0.4, 0],
+          deltaYawDeg: 0,
+          reason: `Remove ${prop.id} clutter to open auditorium sightlines and emergency egress corridors.`,
+        };
+        const trialPatch: LayoutPatch = {
+          contractVersion: CONTRACT_VERSION,
+          runId: 'preview_custom_glb',
+          parentSceneHash: currentSnap.sceneHash,
+          diagnosis: [],
+          operations: [removalOp],
+          summary: `Removed ${prop.id}.`,
+        };
+        const val = applyAndValidatePatch(
+          baselineSnapshot,
+          currentSnap,
+          trialPatch,
+        );
+        if (val.valid && val.snapshot) {
+          ops.push(removalOp);
+          targetedSet.add(prop.id);
+          currentSnap = val.snapshot;
+          currentEval = evaluateSceneWithFallback(val.snapshot);
+        }
       }
     }
 

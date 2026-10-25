@@ -42,8 +42,17 @@ export function collectOccludersForAttendee(
 ): WorldOccluder[] {
   const occluders: WorldOccluder[] = [];
 
+  const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
   for (const obj of snapshot.objects) {
     if (obj.id === ownObjectId) continue;
+    // In standalone .glb buildings, movable_prop obstructions lowered below floor level (dy <= -0.15) have been cleared/removed
+    if (
+      isStandaloneGlb &&
+      obj.category === 'movable_prop' &&
+      obj.transform.position[1] < obj.baselineTransform.position[1] - 0.15
+    ) {
+      continue;
+    }
     for (const proxy of obj.proxies) {
       if (!proxy.blocksVisibility) continue;
       const worldCenter = localToWorldPoint(

@@ -481,6 +481,7 @@ export function VenueViewportStage({
             align.position[1],
             align.position[2],
           );
+          let anyObjectModified = false;
           for (const obj of snapshot.objects) {
             const dx =
               obj.transform.position[0] - obj.baselineTransform.position[0];
@@ -495,14 +496,29 @@ export function VenueViewportStage({
               Math.abs(dz) > 1e-4 ||
               Math.abs(dYaw) > 1e-4
             ) {
+              anyObjectModified = true;
               const targetNode = archGroup.getObjectByName(obj.id);
               if (targetNode) {
-                targetNode.position.x += dx;
-                targetNode.position.y += dy;
-                targetNode.position.z += dz;
-                targetNode.rotation.y += (dYaw * Math.PI) / 180;
+                if (obj.category === 'movable_prop' && dy < -0.15) {
+                  targetNode.visible = false;
+                } else {
+                  targetNode.position.x += dx;
+                  targetNode.position.y += dy;
+                  targetNode.position.z += dz;
+                  targetNode.rotation.y += (dYaw * Math.PI) / 180;
+                }
               }
             }
+          }
+          // When a repair patch has been applied to a standalone .glb auditorium/classroom,
+          // ensure all remaining Flaw_* and Obs_* obstruction meshes in the 3D scene are removed/hidden!
+          if (anyObjectModified) {
+            archGroup.traverse((child) => {
+              const lower = (child.name || '').toLowerCase();
+              if (lower.includes('flaw') || lower.startsWith('obs_')) {
+                child.visible = false;
+              }
+            });
           }
           scene.add(archGroup);
           renderFrameRef.current?.();

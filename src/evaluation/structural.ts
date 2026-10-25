@@ -476,8 +476,14 @@ export function validateSceneStructure(
     for (const item of shapesToCheck) {
       if (outOfBoundsReported) break;
 
+      const isRemovedGlbProp =
+        isStandaloneGlb &&
+        obj.category === 'movable_prop' &&
+        obj.transform.position[1] < obj.baselineTransform.position[1] - 0.15;
+
       // 4a. Check roomBounds for all objects
       if (
+        !isRemovedGlbProp &&
         !isShapeInsideRoomBounds(
           item.shape2D,
           item.minY,
