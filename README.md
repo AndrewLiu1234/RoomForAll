@@ -27,6 +27,19 @@ All four workstreams branch from this foundational commit and import shared sche
 
 ---
 
+## 2.5. Included 3D Building Files (`building-files/`)
+
+The repository includes ready-to-parse binary glTF 2.0 (`.glb`) 3D building assets in [`building-files/`](./building-files/README.md) (for agents and developers testing 3D seat extraction, multi-level riser elevation, and Sight Target detection):
+
+- **`building-files/smallClassroom.glb`** (also bundled at `public/venue/smallClassroom.glb` for the `Classroom · 50 (.glb)` preset):
+  - **50 3D chairs** (`Chair_R1_S01` .. `Chair_R5_S10`) across **5 curved oak tiers** (`y = 0.16 m, 0.34 m, 0.52 m, 0.70 m, 0.88 m`).
+  - **Sight Target:** `Screen_Projection_16x9` (`[0.60, 2.94, -4.38]`, `3.72 m × 2.04 m`) and `Wall_Teaching_SlidingChalkboards` (`[0.80, 1.57, -4.48]`).
+  - **Obstacles & Exits:** `Obs_Rolling_Whiteboard_Easel`, `Obs_Mobile_AV_Cart`, `Obs_Lecture_Capture_Tripod`, `Obs_Aisle_Backpacks_And_Bin`, `Exit_Door_1_Rear_West`, `Exit_Door_2_Front_East`.
+- **`building-files/torium.glb`**:
+  - **1,528 3D auditorium seats** (`Seat_Orch_*`, `Seat_GT01..05_*`, `Seat_LowerGallery_*`, `Seat_UpperGallery_*`) across Orchestra, Grand Tier, and Side Galleries (`y = 0.15 m .. 9.26 m`), plus `Stage_Apron_And_Riser` and `Proscenium_Arch_Wall`.
+
+---
+
 ## 3. Quick Start
 
 ```bash
