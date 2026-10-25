@@ -32,6 +32,8 @@ import {
   getActiveKeyframeAtTime,
   getOverviewCameraPose,
   getProxyWorldTransform,
+  loadPreparedVenueManifest,
+  parseVenueGlbBinary,
 } from '../../src/scene/index.js';
 
 /**
@@ -482,10 +484,10 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(view.getUint32(16, true)).toBe(0x4e4f534a); // 'JSON' chunk
 
     const venueDir = path.resolve(process.cwd(), 'public', 'venue');
-    expect(fs.existsSync(path.join(venueDir, 'prepared-venue.glb'))).toBe(true);
-    expect(fs.existsSync(path.join(venueDir, 'scene-manifest.json'))).toBe(
-      true,
-    );
+    const glbDiskPath = path.join(venueDir, 'prepared-venue.glb');
+    const manifestDiskPath = path.join(venueDir, 'scene-manifest.json');
+    expect(fs.existsSync(glbDiskPath)).toBe(true);
+    expect(fs.existsSync(manifestDiskPath)).toBe(true);
     expect(fs.existsSync(path.join(venueDir, 'PROVENANCE.md'))).toBe(true);
     expect(fs.existsSync(path.join(venueDir, 'dev-fixture-smoke.webm'))).toBe(
       true,
@@ -493,6 +495,39 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(
       fs.existsSync(path.join(venueDir, 'dev-fixture-smoke.manifest.json')),
     ).toBe(true);
+
+    // Verify in-memory createPreparedVenueSnapshot() sceneHash is 100% identical to on-disk scene-manifest.json
+    const onDiskManifest = JSON.parse(
+      fs.readFileSync(manifestDiskPath, 'utf-8'),
+    ) as SceneSnapshot;
+    expect(onDiskManifest.sceneHash).toBe(snapshot.sceneHash);
+    expect(onDiskManifest.source.assetHash).toBe(snapshot.source.assetHash);
+
+    // Verify parseVenueGlbBinary parses all SceneObject nodes from prepared-venue.glb
+    const onDiskGlb = new Uint8Array(fs.readFileSync(glbDiskPath));
+    const parsedGlb = parseVenueGlbBinary(onDiskGlb);
+    expect(parsedGlb.version).toBe(2);
+    expect(parsedGlb.totalByteLength).toBe(onDiskGlb.byteLength);
+    for (const obj of snapshot.objects) {
+      expect(parsedGlb.nodeNames).toContain(obj.id);
+    }
+
+    // Verify buildDefaultCaptureKeyframes picks the primary *_01 attendees (including att_shorter_01!)
+    const defaultKfs = buildDefaultCaptureKeyframes(snapshot, 10);
+    const povAttendeeIds = defaultKfs
+      .filter((k) => k.kind === 'attendee_pov')
+      .map((k) => k.attendeeId);
+    expect(povAttendeeIds).toEqual([
+      'att_shorter_01',
+      'att_extra_legroom_01',
+      'att_wheelchair_01',
+      'att_adult_01',
+    ]);
+  });
+
+  it('loads prepared venue manifest via loadPreparedVenueManifest fallback when offline', async () => {
+    const loaded = await loadPreparedVenueManifest('/nonexistent-url.json');
+    expect(loaded.sceneHash).toBe(createPreparedVenueSnapshot().sceneHash);
   });
 
   it('instantiates VenueViewport and computes finite spherical orbit coordinates across all presets', () => {

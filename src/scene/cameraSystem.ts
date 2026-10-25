@@ -179,7 +179,8 @@ export function buildDefaultCaptureKeyframes(
   const duration = Math.max(1.0, totalDurationSec);
   const overviewPose = getOverviewCameraPose(snapshot, 'front_high');
 
-  // Pick one representative attendee per profile in priority order
+  // Pick one representative attendee per profile in priority order, sorting by attendeeId
+  // so primary test/audit attendees (*_01) are deterministically selected first.
   const priorityProfiles: ProfileId[] = [
     'shorter_seated',
     'extra_legroom',
@@ -187,9 +188,13 @@ export function buildDefaultCaptureKeyframes(
     'reference_adult',
   ];
 
+  const sortedRoster = [...snapshot.roster].sort((a, b) =>
+    a.attendeeId.localeCompare(b.attendeeId),
+  );
+
   const selectedAttendeeIds: string[] = [];
   for (const profileId of priorityProfiles) {
-    const match = snapshot.roster.find(
+    const match = sortedRoster.find(
       (a) =>
         a.profileId === profileId &&
         !selectedAttendeeIds.includes(a.attendeeId),
@@ -200,7 +205,7 @@ export function buildDefaultCaptureKeyframes(
   }
 
   // If roster had fewer than 4 distinct profiles, fill with remaining roster members up to 4 POV stops
-  for (const member of snapshot.roster) {
+  for (const member of sortedRoster) {
     if (selectedAttendeeIds.length >= 4) break;
     if (!selectedAttendeeIds.includes(member.attendeeId)) {
       selectedAttendeeIds.push(member.attendeeId);

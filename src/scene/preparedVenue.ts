@@ -774,7 +774,10 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
     roster,
   };
 
-  return withUpdatedSceneHash(baseSnapshot);
+  const initialSnapshot = withUpdatedSceneHash(baseSnapshot);
+  const { assetHash } = generateVenueGlbBinary(initialSnapshot);
+  initialSnapshot.source.assetHash = assetHash;
+  return withUpdatedSceneHash(initialSnapshot);
 }
 
 /**
@@ -1060,7 +1063,94 @@ export function generateVenueGlbBinary(snapshot: SceneSnapshot): {
   glbBytes.set(binChunkData, offset + 8);
 
   const assetHash = hashStringDeterministic(
-    `${snapshot.sceneId}:${snapshot.sceneHash}:${totalByteLength}`,
+    `${snapshot.sceneId}:${totalByteLength}:${nodes.length}`,
   );
   return { glbBytes, assetHash };
+}
+
+/**
+ * Parses and validates a glTF 2.0 binary (`.glb`) buffer, returning its header metadata,
+ * parsed JSON scene graph, and node names.
+ */
+export function parseVenueGlbBinary(glbBytes: Uint8Array): {
+  magic: number;
+  version: number;
+  totalByteLength: number;
+  jsonChunk: Record<string, unknown>;
+  binByteLength: number;
+  nodeNames: string[];
+} {
+  if (glbBytes.byteLength < 28) {
+    throw new Error(`Invalid GLB buffer: byteLength=${glbBytes.byteLength} < 28`);
+  }
+  const view = new DataView(
+    glbBytes.buffer,
+    glbBytes.byteOffset,
+    glbBytes.byteLength,
+  );
+  const magic = view.getUint32(0, true);
+  const version = view.getUint32(4, true);
+  const totalByteLength = view.getUint32(8, true);
+  if (magic !== 0x46546c67 || version !== 2) {
+    throw new Error(
+      `Invalid GLB header: magic=0x${magic.toString(16)} version=${version}`,
+    );
+  }
+  const jsonChunkLength = view.getUint32(12, true);
+  const jsonChunkType = view.getUint32(16, true);
+  if (jsonChunkType !== 0x4e4f534a) {
+    throw new Error(
+      `Expected GLB JSON chunk (0x4e4f534a), got 0x${jsonChunkType.toString(16)}`,
+    );
+  }
+  const jsonBytes = glbBytes.subarray(20, 20 + jsonChunkLength);
+  const jsonText = new TextDecoder().decode(jsonBytes).trim();
+  const jsonChunk = JSON.parse(jsonText) as Record<string, unknown>;
+
+  const binOffset = 20 + jsonChunkLength;
+  const binByteLength =
+    binOffset + 8 <= glbBytes.byteLength
+      ? view.getUint32(binOffset, true)
+      : 0;
+
+  const nodes = Array.isArray(jsonChunk.nodes)
+    ? (jsonChunk.nodes as Array<{ name?: string }>)
+    : [];
+  const nodeNames = nodes
+    .map((n) => (typeof n.name === 'string' ? n.name : ''))
+    .filter(Boolean);
+
+  return {
+    magic,
+    version,
+    totalByteLength,
+    jsonChunk,
+    binByteLength,
+    nodeNames,
+  };
+}
+
+/**
+ * Loads the frozen prepared venue `SceneSnapshot` from `/venue/scene-manifest.json`
+ * when `fetch` is available in a browser, falling back deterministically to
+ * `createPreparedVenueSnapshot()` in offline/test contexts.
+ */
+export async function loadPreparedVenueManifest(
+  manifestUrl: string = PREPARED_VENUE_MANIFEST_PATH,
+): Promise<SceneSnapshot> {
+  if (typeof fetch === 'function') {
+    try {
+      const response = await fetch(manifestUrl);
+      if (response.ok) {
+        const parsed = (await response.json()) as SceneSnapshot;
+        const verified = withUpdatedSceneHash(parsed);
+        if (verified.sceneHash === parsed.sceneHash) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Fall back to deterministic in-memory snapshot when running without an HTTP static server
+    }
+  }
+  return createPreparedVenueSnapshot();
 }

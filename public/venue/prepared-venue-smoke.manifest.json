@@ -3,7 +3,7 @@
   "captureId": "cap_smoke_prepared_venue_baseline",
   "runId": "run_smoke_prepared_venue",
   "phase": "baseline",
-  "sceneHash": "vp_703ef889d75a7bc4",
+  "sceneHash": "vp_acff0fa97a14c5e6",
   "mimeType": "video/webm",
   "byteLength": 1428,
   "durationSec": 10,
@@ -30,18 +30,18 @@
       "endSec": 2
     },
     {
-      "viewId": "pov_att_shorter_02",
-      "label": "Riley Gomez (Shorter Viewer) (shorter_seated @ place_chair_r1_c2)",
+      "viewId": "pov_att_shorter_01",
+      "label": "Sam Patel (Shorter Viewer) (shorter_seated @ place_chair_r1_c3)",
       "kind": "attendee_pov",
-      "attendeeId": "att_shorter_02",
-      "placeId": "place_chair_r1_c2",
+      "attendeeId": "att_shorter_01",
+      "placeId": "place_chair_r1_c3",
       "cameraPosition": [
-        -1.15,
+        0,
         0.97,
         -2
       ],
       "cameraLookAt": [
-        -1.15,
+        0,
         0.97,
         -7
       ],

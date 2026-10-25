@@ -4,14 +4,19 @@
  *
  * Implements `captureEvidence(snapshot, tourSpec)` per PRD §7, §10 Step 2 & ARGON_MVP_PROMPT §6:
  * - Validates `snapshot.sceneHash === tourSpec.sceneHash` and checks deadline.
- * - Synthesizes deterministic keyframes if `tourSpec.keyframes` is empty.
+ * - Synthesizes deterministic keyframes if `tourSpec.keyframes` is empty, and synchronizes
+ *   all `attendee_pov` keyframe poses with the current `snapshot` (so revision captures
+ *   reflect moved chair coordinates).
  * - Renders `snapshot` with `cleanForEvidenceCapture: true` (zero heatmaps or answer-revealing labels)
  *   and enforces self-occlusion exclusion on every `attendee_pov` keyframe.
+ * - Composites the 3D WebGL frame (or 2D projection fallback if WebGL is unavailable in a headless browser)
+ *   with a neutral camera-telemetry slate (`viewId`, `attendeeId`, `placeId`, `t=X.Xs`) so Argon
+ *   can cite exact `viewId` and `timestampSec` in `LayoutPatch.diagnosis`.
  * - Uses a background-tab-safe `setInterval` frame loop + `MediaRecorder` in browsers,
  *   and deterministically cleans up the WebGL context (`dispose()` + `forceContextLoss()`)
  *   in a `finally` block to prevent Chrome WebGL context exhaustion.
  * - Falls back to valid EBML/WebM container bytes (`createDeterministicWebmBytes`) when running
- *   in headless Node / Vitest environments where WebGL or `MediaRecorder` is unavailable.
+ *   in headless Node / Vitest environments where `MediaRecorder` is unavailable.
  */
 import * as THREE from 'three';
 import {
@@ -175,6 +180,93 @@ export async function captureEvidence(
   return { videoBlob, manifest };
 }
 
+function drawNeutralCameraSlate(
+  ctx: CanvasRenderingContext2D,
+  activeKf: CaptureKeyframe | undefined,
+  virtualSec: number,
+  widthPx: number,
+): void {
+  if (!activeKf) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+  ctx.fillRect(0, 0, widthPx, 28);
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, monospace';
+  const who = activeKf.attendeeId
+    ? ` · ${activeKf.attendeeId} (${activeKf.placeId ?? ''})`
+    : ' · Room Overview';
+  const text = `${activeKf.viewId}${who} · t=${virtualSec.toFixed(1)}s`;
+  ctx.fillText(text, 10, 18);
+  ctx.restore();
+}
+
+function draw2DFallbackProjection(
+  ctx: CanvasRenderingContext2D,
+  snapshot: SceneSnapshot,
+  activeKf: CaptureKeyframe | undefined,
+  widthPx: number,
+  heightPx: number,
+): void {
+  ctx.save();
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, widthPx, heightPx);
+
+  // Top-down architectural plan fallback when WebGL is disabled in a headless browser
+  const minX = snapshot.roomBounds.min[0];
+  const maxX = snapshot.roomBounds.max[0];
+  const minZ = snapshot.roomBounds.min[2];
+  const maxZ = snapshot.roomBounds.max[2];
+  const scaleX = (widthPx - 60) / Math.max(1, maxX - minX);
+  const scaleZ = (heightPx - 80) / Math.max(1, maxZ - minZ);
+  const scale = Math.min(scaleX, scaleZ);
+
+  const toScreen = (wx: number, wz: number): [number, number] => [
+    widthPx / 2 + wx * scale,
+    heightPx / 2 + wz * scale,
+  ];
+
+  // Target screen bar
+  const [tx, tz] = toScreen(
+    snapshot.target.center[0],
+    snapshot.target.center[2],
+  );
+  ctx.fillStyle = '#38bdf8';
+  ctx.fillRect(
+    tx - (snapshot.target.widthM * scale) / 2,
+    tz - 4,
+    snapshot.target.widthM * scale,
+    8,
+  );
+
+  // Scene objects
+  for (const obj of snapshot.objects) {
+    const [ox, oz] = toScreen(
+      obj.transform.position[0],
+      obj.transform.position[2],
+    );
+    ctx.fillStyle =
+      obj.category === 'movable_prop'
+        ? '#d97706'
+        : obj.category === 'wheelchair_bay_frame'
+          ? '#2563eb'
+          : '#64748b';
+    ctx.fillRect(ox - 6, oz - 6, 12, 12);
+  }
+
+  if (activeKf?.attendeeId) {
+    const [cx, cz] = toScreen(
+      activeKf.cameraPosition[0],
+      activeKf.cameraPosition[2],
+    );
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cz, 10, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 async function recordBrowserCanvasClip(params: {
   snapshot: SceneSnapshot;
   tourSpec: CaptureTourSpec;
@@ -194,27 +286,37 @@ async function recordBrowserCanvasClip(params: {
     deadlineMs,
   } = params;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = widthPx;
-  canvas.height = heightPx;
+  const recordingCanvas = document.createElement('canvas');
+  recordingCanvas.width = widthPx;
+  recordingCanvas.height = heightPx;
+  const ctx2d = recordingCanvas.getContext('2d');
+
+  const webglCanvas = document.createElement('canvas');
+  webglCanvas.width = widthPx;
+  webglCanvas.height = heightPx;
 
   let renderer: THREE.WebGLRenderer | null = null;
   let builtScene: ReturnType<typeof buildVenueThreeScene> | null = null;
 
   try {
-    renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      preserveDrawingBuffer: true,
-      powerPreference: 'high-performance',
-    });
-    renderer.setSize(widthPx, heightPx, false);
-    renderer.setPixelRatio(1);
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas: webglCanvas,
+        antialias: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'high-performance',
+      });
+      renderer.setSize(widthPx, heightPx, false);
+      renderer.setPixelRatio(1);
 
-    builtScene = buildVenueThreeScene(snapshot, {
-      cleanForEvidenceCapture: true,
-      viewMode: 'overview',
-    });
+      builtScene = buildVenueThreeScene(snapshot, {
+        cleanForEvidenceCapture: true,
+        viewMode: 'overview',
+      });
+    } catch {
+      renderer = null;
+      builtScene = null;
+    }
 
     const camera = new THREE.PerspectiveCamera(
       INSPECTION_CAMERA.fovDeg,
@@ -223,29 +325,46 @@ async function recordBrowserCanvasClip(params: {
       INSPECTION_CAMERA.farM,
     );
 
+    const targetCanvas = ctx2d ? recordingCanvas : webglCanvas;
+
     const renderKeyframeAt = (elapsedSec: number) => {
-      if (!builtScene || !renderer) return;
       const activeKf =
         getActiveKeyframeAtTime(keyframes, elapsedSec) ?? keyframes[0];
-      if (activeKf) {
-        applyActiveViewerVisibility(
-          builtScene.scene,
+
+      if (builtScene && renderer) {
+        if (activeKf) {
+          applyActiveViewerVisibility(
+            builtScene.scene,
+            snapshot,
+            activeKf.kind,
+            activeKf.attendeeId,
+            builtScene.objectNodesById,
+            builtScene.attendeeProxyNodesById,
+          );
+          applyKeyframeToCamera(camera, activeKf);
+        }
+        renderer.render(builtScene.scene, camera);
+        if (ctx2d) {
+          ctx2d.drawImage(webglCanvas, 0, 0);
+          drawNeutralCameraSlate(ctx2d, activeKf, elapsedSec, widthPx);
+        }
+      } else if (ctx2d) {
+        draw2DFallbackProjection(
+          ctx2d,
           snapshot,
-          activeKf.kind,
-          activeKf.attendeeId,
-          builtScene.objectNodesById,
-          builtScene.attendeeProxyNodesById,
+          activeKf,
+          widthPx,
+          heightPx,
         );
-        applyKeyframeToCamera(camera, activeKf);
+        drawNeutralCameraSlate(ctx2d, activeKf, elapsedSec, widthPx);
       }
-      renderer.render(builtScene.scene, camera);
     };
 
     // Draw initial frame before starting stream
     renderKeyframeAt(0);
 
     const captureStreamFn = (
-      canvas as HTMLCanvasElement & {
+      targetCanvas as HTMLCanvasElement & {
         captureStream?: (frameRate?: number) => MediaStream;
       }
     ).captureStream;
@@ -254,7 +373,7 @@ async function recordBrowserCanvasClip(params: {
     }
 
     const fps = 24;
-    const stream = captureStreamFn.call(canvas, fps);
+    const stream = captureStreamFn.call(targetCanvas, fps);
     const chosenMime = selectSupportedMediaMimeType();
     const recorder = new MediaRecorder(stream, {
       mimeType: chosenMime,
@@ -313,7 +432,10 @@ async function recordBrowserCanvasClip(params: {
       const frameStepMs = Math.round(1000 / fps);
       intervalId = setInterval(() => {
         const elapsedWallMs = performance.now() - startWallMs;
-        const progress = Math.min(1.0, elapsedWallMs / Math.max(1, wallDurationMs));
+        const progress = Math.min(
+          1.0,
+          elapsedWallMs / Math.max(1, wallDurationMs),
+        );
         const virtualSec = progress * requestedDurationSec;
 
         renderKeyframeAt(virtualSec);

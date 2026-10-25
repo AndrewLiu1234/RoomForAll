@@ -27,6 +27,8 @@ export {
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
   generateVenueGlbBinary,
+  loadPreparedVenueManifest,
+  parseVenueGlbBinary,
 } from './preparedVenue.js';
 
 export {
