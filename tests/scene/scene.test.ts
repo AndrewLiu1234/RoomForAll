@@ -21,6 +21,7 @@ import {
   applyAndValidatePatch,
   compareEvaluations,
   evaluateScene,
+  simulateEvacuation,
 } from '../../src/evaluation/index.js';
 import {
   VenueViewport,
@@ -928,6 +929,29 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       const clsEval = evaluateScene(clsReport.snapshot);
       expect(clsEval.isValidStructure).toBe(true);
       expect(clsEval.occupiedCount).toBe(4);
+
+      // Verify ExitFinderAgent parsed both exits (Exit_1_FrontLeft and Exit_2_FrontRight) into snapshot.exits
+      // and evacuating people navigate to those exact exit points and disappear (state === 'exited')
+      expect(clsReport.snapshot.exits).toHaveLength(2);
+      expect(clsReport.snapshot.exits?.map((e) => e.id)).toEqual([
+        'Exit_1_FrontLeft',
+        'Exit_2_FrontRight',
+      ]);
+      expect(clsReport.snapshot.exits?.[0]?.position[0]).toBeCloseTo(-4.01, 1);
+      expect(clsReport.snapshot.exits?.[0]?.position[1]).toBeCloseTo(-4.5, 1);
+      expect(clsReport.snapshot.exits?.[1]?.position[0]).toBeCloseTo(4.69, 1);
+      expect(clsReport.snapshot.exits?.[1]?.position[1]).toBeCloseTo(-4.5, 1);
+
+      const evacSim = simulateEvacuation(
+        clsReport.snapshot,
+        'emergency_evacuation',
+      );
+      expect(evacSim.totalExitCount).toBe(2);
+      expect(evacSim.activeExitCount).toBe(2);
+      const finalFrame = evacSim.frames[evacSim.frames.length - 1]!;
+      const finalAgents = Object.values(finalFrame.agents);
+      expect(finalAgents).toHaveLength(4);
+      expect(finalAgents.every((a) => a.state === 'exited')).toBe(true);
     }
 
     // Also verify spawnRandomFourAttendees on arbitrary place lists

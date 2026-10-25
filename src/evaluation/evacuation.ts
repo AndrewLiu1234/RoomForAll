@@ -313,6 +313,34 @@ function buildAgentEgressWaypoints(
 
   const waypoints: Vec2[] = [];
 
+  // For uploaded .glb venues with explicit parsed exit points (`snapshot.exits`),
+  // route each attendee along their row to the side aisle on the chosen exit's side,
+  // and then straight along the side aisle into `[bestExit.position[0], bestExit.position[1]]`.
+  if (snapshot.exits && snapshot.exits.length > 0 && !snapshot.source.isFallbackFixture) {
+    let nearestExit = candidateExits[0]!;
+    let nearestDist = Infinity;
+    for (const exit of candidateExits) {
+      const d = Math.hypot(
+        exit.position[0] - seatPos[0],
+        exit.position[1] - seatPos[1],
+      );
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestExit = exit;
+      }
+    }
+    bestExit = nearestExit;
+
+    const sideAisleX =
+      bestExit.position[0] < 0
+        ? Math.min(seatPos[0] - 0.35, bestExit.position[0] + 0.15)
+        : Math.max(seatPos[0] + 0.35, bestExit.position[0] - 0.15);
+
+    waypoints.push([Number(sideAisleX.toFixed(3)), seatPos[1]]);
+    waypoints.push([bestExit.position[0], bestExit.position[1]]);
+    return { waypoints, targetExitId: bestExit.id };
+  }
+
   // 1. Step forward/backward into the row cross-aisle Z before moving laterally to aisle anchor
   const rowAislePoint: Vec2 = [seatPos[0], anchor[1]];
   if (Math.hypot(rowAislePoint[0] - seatPos[0], rowAislePoint[1] - seatPos[1]) > 0.15) {

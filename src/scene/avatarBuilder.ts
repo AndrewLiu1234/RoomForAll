@@ -447,9 +447,18 @@ export function updateAvatarAnimationPose(
     ? 0
     : Math.abs(Math.sin(phase)) * Math.min(0.035, agentState.speedMps * 0.022);
 
+  // Smoothly transition vertical elevation from tiered risers down to floor level (y=0) as evacuees walk toward front exits
+  const baseFloorHeight = Math.max(0, baseCenterWorld[1] - 0.85);
+  const rampFactor =
+    baseFloorHeight > 0.05 && agentState.position[1] < 0
+      ? Math.max(0, Math.min(1, (agentState.position[1] + 2.8) / 3.5))
+      : 1;
+  const effectiveCenterY =
+    baseCenterWorld[1] - baseFloorHeight * (1 - rampFactor);
+
   rootMesh.position.set(
     agentState.position[0],
-    baseCenterWorld[1] + standingLiftM + bobM,
+    effectiveCenterY + standingLiftM + bobM,
     agentState.position[1],
   );
   rootMesh.rotation.y = agentState.yawDeg * DEG_TO_RAD;

@@ -27,6 +27,7 @@ import {
   type SceneSnapshot,
   type Vec2,
   type Vec3,
+  type VenueExitPortal,
 } from '../shared/index.js';
 import {
   generateVenueGlbBinary,
@@ -307,6 +308,23 @@ function classifyNodeRole(
   const extraCat =
     typeof extras?.category === 'string' ? extras.category : undefined;
 
+  const extraRole =
+    typeof extras?.role === 'string' ? extras.role : undefined;
+
+  if (
+    extraCat === 'exit' ||
+    extraRole === 'exit_or_entrance' ||
+    lower.includes('exit') ||
+    lower.includes('entrance') ||
+    lower.includes('door') ||
+    lower.includes('egress') ||
+    lower.includes('portal') ||
+    matJoined.includes('exit_red') ||
+    matJoined.includes('exit_housing') ||
+    matJoined.includes('door_vision')
+  ) {
+    return 'exit_or_entrance';
+  }
   if (
     lower.includes('master_auditorium_seat') ||
     lower.includes('floor') ||
@@ -330,15 +348,6 @@ function classifyNodeRole(
     lower.includes('steppedseatingdecks')
   ) {
     return 'floor_or_shell';
-  }
-  if (
-    lower.includes('exit') ||
-    lower.includes('entrance') ||
-    lower.includes('door') ||
-    lower.includes('egress') ||
-    lower.includes('portal')
-  ) {
-    return 'exit_or_entrance';
   }
   if (
     extraCat === 'movable_prop' ||
@@ -599,6 +608,81 @@ function selectBestSightTargetAgent(params: {
     widthM: 3.0,
     heightM: 1.6,
   };
+}
+
+/**
+ * ExitFinderAgent: Finds all exit doors / egress portals in the .glb and computes their
+ * walkable floor navigation target points (`VenueExitPortal[]`) where evacuating people
+ * navigate to and disappear.
+ */
+function selectExitPortalsAgent(params: {
+  exitNodes: AutoLabeledGlbNode[];
+  seatNodes: AutoLabeledGlbNode[];
+  roomBounds: { min: Vec3; max: Vec3 };
+}): VenueExitPortal[] {
+  const { exitNodes, seatNodes, roomBounds } = params;
+
+  const avgSeatX =
+    seatNodes.length > 0
+      ? seatNodes.reduce((s, n) => s + n.positionWorld[0], 0) / seatNodes.length
+      : 0;
+  const avgSeatZ =
+    seatNodes.length > 0
+      ? seatNodes.reduce((s, n) => s + n.positionWorld[2], 0) / seatNodes.length
+      : 0;
+
+  if (exitNodes.length > 0) {
+    const portals: VenueExitPortal[] = [];
+    const sortedExits = [...exitNodes].sort(
+      (a, b) => a.positionWorld[0] - b.positionWorld[0],
+    );
+
+    sortedExits.forEach((node, idx) => {
+      const rawX = node.positionWorld[0];
+      const rawZ = node.positionWorld[2];
+
+      // Step 0.24m inward from the wall toward the seating bowl center so the exit marker point
+      // sits right on the walkable interior threshold in front of the door leaf
+      const dirX = avgSeatX - rawX;
+      const dirZ = avgSeatZ - rawZ;
+      const len = Math.hypot(dirX, dirZ) || 1;
+      const inwardStepM = 0.24;
+      const targetX = Number((rawX + (dirX / len) * inwardStepM).toFixed(3));
+      const targetZ = Number((rawZ + (dirZ / len) * inwardStepM).toFixed(3));
+
+      const widthM = Number(
+        Math.max(
+          0.95,
+          Math.min(1.8, Math.max(node.sizeWorld[0], node.sizeWorld[2])),
+        ).toFixed(2),
+      );
+
+      portals.push({
+        id: node.name,
+        label: `Exit ${idx + 1} (${node.name})`,
+        position: [targetX, targetZ],
+        widthM,
+        yawDeg: node.yawDeg,
+        isEmergencyExit: idx > 0,
+      });
+    });
+
+    return portals;
+  }
+
+  return [
+    {
+      id: 'exit_auto_west',
+      label: 'Primary West Exit Point',
+      position: [
+        Number((roomBounds.min[0] + 0.85).toFixed(2)),
+        Number((roomBounds.max[2] - 0.65).toFixed(2)),
+      ],
+      widthM: 1.3,
+      yawDeg: 0,
+      isEmergencyExit: false,
+    },
+  ];
 }
 
 /**
@@ -1398,6 +1482,13 @@ export function parseAndLabelGlbVenue(
     roomBounds,
   });
 
+  // Use ExitFinderAgent to locate the real exit points in the .glb where evacuating people navigate to and disappear
+  const resolvedExits = selectExitPortalsAgent({
+    exitNodes,
+    seatNodes,
+    roomBounds,
+  });
+
   const objects: SceneObject[] = [];
   const places: AudiencePlace[] = [];
 
@@ -1832,9 +1923,14 @@ export function parseAndLabelGlbVenue(
     if (
       propGroups.has('Obs_Welcome_Sign_Standee') &&
       places.some((p) => p.id === 'place_chair_r1_c5') &&
-      places.some((p) => p.id === 'place_chair_r1_c6')
+      places.some((p) => p.id === 'place_chair_r1_c8') &&
+      places.some((p) => p.id === 'place_chair_r1_c2')
     ) {
-      const usedIds = new Set(['place_chair_r1_c5', 'place_chair_r1_c6']);
+      const usedIds = new Set([
+        'place_chair_r1_c5',
+        'place_chair_r1_c8',
+        'place_chair_r1_c2',
+      ]);
       const shorterEntry = roster.find((r) => r.attendeeId === 'att_shorter_01');
       if (shorterEntry) {
         shorterEntry.assignedPlaceId = 'place_chair_r1_c5';
@@ -1844,13 +1940,19 @@ export function parseAndLabelGlbVenue(
         (r) => r.attendeeId === 'att_extra_legroom_01',
       );
       if (extraEntry) {
-        extraEntry.assignedPlaceId = 'place_chair_r1_c6';
-        extraEntry.label = 'Morgan Lee (Extra-Legroom · Seat R1-6)';
+        extraEntry.assignedPlaceId = 'place_chair_r1_c8';
+        extraEntry.label = 'Morgan Lee (Extra-Legroom · Seat R1-8)';
+      }
+      const adult2Entry = roster.find((r) => r.attendeeId === 'att_adult_02');
+      if (adult2Entry) {
+        adult2Entry.assignedPlaceId = 'place_chair_r1_c2';
+        adult2Entry.label = 'Riley Gomez (Reference Adult · Seat R1-2)';
       }
       for (const r of roster) {
         if (
           r.attendeeId !== 'att_shorter_01' &&
-          r.attendeeId !== 'att_extra_legroom_01'
+          r.attendeeId !== 'att_extra_legroom_01' &&
+          r.attendeeId !== 'att_adult_02'
         ) {
           if (usedIds.has(r.assignedPlaceId)) {
             const replacement = places.find(
@@ -1976,6 +2078,7 @@ export function parseAndLabelGlbVenue(
     chairGroups,
     places,
     routes,
+    exits: resolvedExits,
     profiles: structuredClone(DEFAULT_PROFILE_REQUIREMENTS),
     roster,
   });
