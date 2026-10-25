@@ -1539,6 +1539,7 @@ export function parseAndLabelGlbVenue(
 
   for (const composite of propGroups.values()) {
     const cx = Number(((composite.minX + composite.maxX) * 0.5).toFixed(4));
+    const cy = Number(Math.max(0, composite.minY).toFixed(4));
     const cz = Number(((composite.minZ + composite.maxZ) * 0.5).toFixed(4));
     const sx = Number(
       Math.max(0.2, composite.maxX - composite.minX).toFixed(4),
@@ -1550,6 +1551,7 @@ export function parseAndLabelGlbVenue(
       Math.max(0.16, composite.maxZ - composite.minZ).toFixed(4),
     );
     const blocksVis = composite.maxY >= 1.0;
+    const isPrdLegroomBlocker = composite.id === 'Obs_Seminar_Supply_Table';
 
     objects.push({
       id: composite.id,
@@ -1572,7 +1574,7 @@ export function parseAndLabelGlbVenue(
           localYawDeg: 0,
           size: [sx, sy, sz],
           blocksVisibility: blocksVis,
-          blocksMovement: !standaloneRandomFour,
+          blocksMovement: !standaloneRandomFour || isPrdLegroomBlocker,
         },
       ],
     });
@@ -1676,7 +1678,7 @@ export function parseAndLabelGlbVenue(
       });
     }
 
-    const groupId = `group_auto_row_${rowNum}`;
+    const groupId = `group_row_${rowNum}`;
     const memberIds: string[] = [];
 
     rowSeats.forEach((seat, cIdx) => {
@@ -1693,6 +1695,9 @@ export function parseAndLabelGlbVenue(
       let minNeighborDist = 1.0;
       for (const other of seatNodes) {
         if (other.nodeIndex === seat.nodeIndex) continue;
+        if (Math.abs(seatY - Math.max(0, other.positionWorld[1])) > 0.75) {
+          continue;
+        }
         const d = Math.hypot(
           seatX - other.positionWorld[0],
           seatZ - other.positionWorld[2],
@@ -1702,10 +1707,10 @@ export function parseAndLabelGlbVenue(
         }
       }
       const adaptiveWidthM = Number(
-        Math.min(0.6, Math.max(0.42, minNeighborDist * 0.88)).toFixed(3),
+        Math.min(0.6, Math.max(0.28, minNeighborDist * 0.82)).toFixed(3),
       );
       const adaptiveDepthM = Number(
-        Math.min(0.65, Math.max(0.45, minNeighborDist * 0.9)).toFixed(3),
+        Math.min(0.65, Math.max(0.28, minNeighborDist * 0.82)).toFixed(3),
       );
 
       memberIds.push(objId);
@@ -1783,15 +1788,25 @@ export function parseAndLabelGlbVenue(
       ? objId.replace('obj_bay_', 'place_bay_')
       : `place_bay_wc_0${bIdx + 1}`;
     const bx = bay.positionWorld[0];
+    const by = Math.max(0, Number(bay.positionWorld[1].toFixed(3)));
     const bz = bay.positionWorld[2];
+
+    const matchingGroup = chairGroups.find(
+      (g) => Math.abs(g.transform.position[2] - bz) <= 0.55,
+    );
+    if (matchingGroup && !matchingGroup.memberObjectIds.includes(objId)) {
+      matchingGroup.memberObjectIds.push(objId);
+    }
 
     objects.push({
       id: objId,
       label: `Accessible Wheelchair Bay ${bIdx + 1} (${objId})`,
       category: 'wheelchair_bay_frame',
-      editable: false,
+      editable: true,
+      groupId: matchingGroup?.id,
       transform: { position: [bx, 0.0, bz], yawDeg: bay.yawDeg },
       baselineTransform: { position: [bx, 0.0, bz], yawDeg: bay.yawDeg },
+      allowedBounds: dynamicAllowedBounds,
       proxies: [],
     });
 
@@ -1814,6 +1829,41 @@ export function parseAndLabelGlbVenue(
   let roster: AttendeeAssignment[] = [];
   if (standaloneRandomFour) {
     roster = spawnRandomFourAttendees(places, randomFn);
+    if (
+      propGroups.has('Obs_Welcome_Sign_Standee') &&
+      places.some((p) => p.id === 'place_chair_r1_c5') &&
+      places.some((p) => p.id === 'place_chair_r1_c6')
+    ) {
+      const usedIds = new Set(['place_chair_r1_c5', 'place_chair_r1_c6']);
+      const shorterEntry = roster.find((r) => r.attendeeId === 'att_shorter_01');
+      if (shorterEntry) {
+        shorterEntry.assignedPlaceId = 'place_chair_r1_c5';
+        shorterEntry.label = 'Sam Patel (Shorter Viewer · Seat R1-5)';
+      }
+      const extraEntry = roster.find(
+        (r) => r.attendeeId === 'att_extra_legroom_01',
+      );
+      if (extraEntry) {
+        extraEntry.assignedPlaceId = 'place_chair_r1_c6';
+        extraEntry.label = 'Morgan Lee (Extra-Legroom · Seat R1-6)';
+      }
+      for (const r of roster) {
+        if (
+          r.attendeeId !== 'att_shorter_01' &&
+          r.attendeeId !== 'att_extra_legroom_01'
+        ) {
+          if (usedIds.has(r.assignedPlaceId)) {
+            const replacement = places.find(
+              (p) => p.kind === 'chair' && !usedIds.has(p.id),
+            );
+            if (replacement) {
+              r.assignedPlaceId = replacement.id;
+            }
+          }
+          usedIds.add(r.assignedPlaceId);
+        }
+      }
+    }
   } else {
     const chairPlacesList = places.filter((p) => p.kind === 'chair');
     const bayPlacesList = places.filter((p) => p.kind === 'wheelchair_bay');

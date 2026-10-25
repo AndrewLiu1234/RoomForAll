@@ -153,11 +153,13 @@ export function createLocalFixtureRepairPreviewRun(
     const validGroupIds = new Set(
       baselineSnapshot.chairGroups.map((g) => g.id),
     );
+    const hasAllFourRowGroups =
+      isBunched || validGroupIds.has('group_row_4');
     const patch: LayoutPatch = {
       ...rawPatch,
       operations: rawPatch.operations.filter((op) =>
         op.targetType === 'group'
-          ? validGroupIds.has(op.targetId)
+          ? hasAllFourRowGroups && validGroupIds.has(op.targetId)
           : validObjectIds.has(op.targetId),
       ),
     };
