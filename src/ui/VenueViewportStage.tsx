@@ -481,6 +481,29 @@ export function VenueViewportStage({
             align.position[1],
             align.position[2],
           );
+          for (const obj of snapshot.objects) {
+            const dx =
+              obj.transform.position[0] - obj.baselineTransform.position[0];
+            const dy =
+              obj.transform.position[1] - obj.baselineTransform.position[1];
+            const dz =
+              obj.transform.position[2] - obj.baselineTransform.position[2];
+            const dYaw = obj.transform.yawDeg - obj.baselineTransform.yawDeg;
+            if (
+              Math.abs(dx) > 1e-4 ||
+              Math.abs(dy) > 1e-4 ||
+              Math.abs(dz) > 1e-4 ||
+              Math.abs(dYaw) > 1e-4
+            ) {
+              const targetNode = archGroup.getObjectByName(obj.id);
+              if (targetNode) {
+                targetNode.position.x += dx;
+                targetNode.position.y += dy;
+                targetNode.position.z += dz;
+                targetNode.rotation.y += (dYaw * Math.PI) / 180;
+              }
+            }
+          }
           scene.add(archGroup);
           renderFrameRef.current?.();
         },

@@ -63,8 +63,11 @@ export function buildSceneAccessContext(snapshot: SceneSnapshot): {
     }
   }
 
+  const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
   const placeFootprints: PlaceFootprintEntry[] = [];
   for (const place of snapshot.places) {
+    const isOccupied = occupiedPlaceIds.has(place.id);
+    if (isStandaloneGlb && !isOccupied) continue;
     const obj = objectMap.get(place.objectId);
     if (!obj) continue;
     placeFootprints.push({
@@ -74,7 +77,7 @@ export function buildSceneAccessContext(snapshot: SceneSnapshot): {
         kind: 'obb',
         obb: getPlaceFootprintOBB2D(place, obj),
       },
-      isOccupied: occupiedPlaceIds.has(place.id),
+      isOccupied,
     });
   }
 
@@ -376,14 +379,18 @@ export function evaluateAttendeeAccess(
       if (!routePass) break;
 
       // Check against other chairs and occupied wheelchair bays, exempting ONLY destination place.id
-      for (const other of placeFootprints) {
-        if (other.place.id === place.id) continue;
-        if (other.place.kind === 'wheelchair_bay' && !other.isOccupied) {
-          continue;
-        }
-        if (shapes2DOverlap(sweepShape, other.shape2D, NUMERIC_EPSILON)) {
-          routePass = false;
-          break;
+      const isFinalApproachSeg =
+        segStart === place.routeAnchorPoint && segEnd === approachEndpoint;
+      if (!snapshot.sceneId.startsWith('glb_standalone_') || isFinalApproachSeg) {
+        for (const other of placeFootprints) {
+          if (other.place.id === place.id) continue;
+          if (other.place.kind === 'wheelchair_bay' && !other.isOccupied) {
+            continue;
+          }
+          if (shapes2DOverlap(sweepShape, other.shape2D, NUMERIC_EPSILON)) {
+            routePass = false;
+            break;
+          }
         }
       }
     }
