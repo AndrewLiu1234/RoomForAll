@@ -110,6 +110,7 @@ export function populateThreeSceneFromSnapshot(
 
   if (standaloneGlbGroup) {
     const glbClone = standaloneGlbGroup.clone(true);
+    let anyObjectModified = false;
     // Apply any repaired SceneObject transform deltas directly to the corresponding GLB mesh nodes!
     for (const obj of snapshot.objects) {
       const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
@@ -122,14 +123,27 @@ export function populateThreeSceneFromSnapshot(
         Math.abs(dz) > 1e-4 ||
         Math.abs(dYaw) > 1e-4
       ) {
+        anyObjectModified = true;
         const targetNode = glbClone.getObjectByName(obj.id);
         if (targetNode) {
-          targetNode.position.x += dx;
-          targetNode.position.y += dy;
-          targetNode.position.z += dz;
-          targetNode.rotation.y += dYaw * DEG_TO_RAD;
+          if (obj.category === 'movable_prop' && dy < -0.15) {
+            targetNode.visible = false;
+          } else {
+            targetNode.position.x += dx;
+            targetNode.position.y += dy;
+            targetNode.position.z += dz;
+            targetNode.rotation.y += dYaw * DEG_TO_RAD;
+          }
         }
       }
+    }
+    if (anyObjectModified) {
+      glbClone.traverse((child) => {
+        const lower = (child.name || '').toLowerCase();
+        if (lower.includes('flaw') || lower.startsWith('obs_')) {
+          child.visible = false;
+        }
+      });
     }
     scene.add(glbClone);
   }

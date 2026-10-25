@@ -408,6 +408,7 @@ export function buildCall1Prompt(blindPayload: BlindCritiquePayload): string {
     'EMERGENCY EVACUATION & EGRESS GUIDANCE:',
     '- Check if seat rows or chairGroups are tightly bunched along Z (narrow inter-row clear gap < 0.45m slows down emergency row extrication and traps interior attendees). If rows or seats are bunched together, propose bounded translations on chairGroups or movable_chair objects to space the rows/seats out.',
     '- Check if any venue exit portal (listed in exits or route endpoints, such as exit_emergency_east) or aisle merge is blocked or narrowed by a movable barrier, cart, or prop (e.g., gateObjectId or movable_prop near the exit). If an emergency exit door or corridor is obstructed, move the blocking object clear so evacuees can escape through multiple exits without traffic jams.',
+    '- OBSTRUCTION REMOVAL: For any movable_prop obstruction (such as Flaw_* or Obs_* tripods, signs, totems, consoles, or carts blocking sightlines or aisles), you can either translate it horizontally out of the way OR completely remove/clear it from the room by setting deltaPositionM to [0, -0.40, 0].',
     '',
     'STRICT PATCH CONSTRAINTS:',
     `- Maximum ${PATCH_CONSTRAINTS.maxOperations} operations on non-overlapping targets (never target both a chairGroup and one of its memberObjectIds).`,

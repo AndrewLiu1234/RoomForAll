@@ -318,7 +318,6 @@ function classifyNodeRole(
     lower.includes('sidegalleries_columns') ||
     lower.includes('spotlight_fixture') ||
     lower.includes('speaker_lectern') ||
-    lower.includes('flaw_low_rigging') ||
     lower.includes('floor') ||
     lower.includes('slab') ||
     lower.includes('ceiling') ||
@@ -358,7 +357,7 @@ function classifyNodeRole(
   if (
     extraCat === 'movable_prop' ||
     lower.startsWith('obs_') ||
-    lower.startsWith('flaw_movable_') ||
+    lower.includes('flaw') ||
     lower.includes('prop') ||
     lower.includes('sign') ||
     lower.includes('table') ||
@@ -1725,11 +1724,7 @@ export function parseAndLabelGlbVenue(
         lower.startsWith('obs_student_backpack') ||
         lower.startsWith('obs_aisle_backpacks') ||
         lower.startsWith('obs_dualbin') ||
-        lower.startsWith('obs_lecture_capture_tripod') ||
-        lower.startsWith('flaw_movable_av_console') ||
-        lower.startsWith('flaw_movable_cable_bridge') ||
-        lower.startsWith('flaw_movable_stage_totem') ||
-        lower.startsWith('flaw_movable_teleprompter_tower'))
+        lower.startsWith('obs_lecture_capture_tripod'))
     ) {
       continue;
     }
