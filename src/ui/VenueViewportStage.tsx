@@ -1472,13 +1472,13 @@ export function VenueViewportStage({
           }}
         >
           <span>
-            🚨 EXIT UNREACHABLE:{' '}
+            🚨 NO REACHABLE EXIT ERROR:{' '}
             {evacSimResult?.trappedCount ??
               evaluation.evacuation?.trappedCount ??
               0}{' '}
-            of {snapshot.roster.length} people got as close as possible to the
-            nearest exit and stopped at a wall/obstacle. Click &ldquo;Instant
-            Repair&rdquo; to add reachable exits!
+            of {snapshot.roster.length} people have no reachable exit without
+            phasing through walls/obstacles. Click &ldquo;Instant Repair&rdquo;
+            to add reachable exits!
           </span>
         </div>
       )}

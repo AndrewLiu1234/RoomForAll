@@ -400,13 +400,20 @@ function getBaseWalkingSpeed(
   }
 }
 
+function computeWaypointChainLength(startPos: Vec2, chain: Vec2[]): number {
+  let total = 0;
+  let cur = startPos;
+  for (const wp of chain) {
+    total += Math.hypot(wp[0] - cur[0], wp[1] - cur[1]);
+    cur = wp;
+  }
+  return total;
+}
+
 /**
- * Builds the deterministic waypoint chain from an attendee's seat to the optimal active exit portal.
- * In a tiered auditorium:
- * - Attendees extricate by stepping forward onto their SAME level platform (never stepping backward onto a higher tier).
- * - They walk laterally along their tier platform to the outside aisle ramp corridor.
- * - If on the elevated rear wheelchair terrace, wheelchair users evacuate directly through the terrace emergency exit.
- * - Otherwise, attendees safely descend along the outside ramps to the front floor exits (never jumping down).
+ * Builds the deterministic waypoint chain from an attendee's seat to the closest REACHABLE exit portal.
+ * If no exit is reachable without phasing through walls/objects or jumping across disconnected levels,
+ * returns `trappedByWall: true` so an error is reported to the user.
  */
 function buildAgentEgressWaypoints(
   seatPos: Vec2,
@@ -425,8 +432,8 @@ function buildAgentEgressWaypoints(
   const candidateExits = usableExits.length > 0 ? usableExits : resolvedExits;
 
   // For uploaded .glb venues with explicit parsed exit points (`snapshot.exits`),
-  // verify that an exit is on a connected vertical level (`|seatY - exitY| <= 0.95m`)
-  // AND has a 2D path that does NOT phase through any wall, parapet, or object!
+  // evaluate ALL exits to find the CLOSEST REACHABLE EXIT (shortest wall-free walkable path
+  // on a connected vertical level `|seatY - exitY| <= 0.95m`), and otherwise report an error!
   if (
     snapshot.exits !== undefined &&
     snapshot.sceneId.startsWith('glb_standalone_')
@@ -446,6 +453,12 @@ function buildAgentEgressWaypoints(
         Math.hypot(b.position[0] - seatPos[0], b.position[1] - seatPos[1]),
     );
 
+    let bestReachable: {
+      waypoints: Vec2[];
+      targetExitId: string;
+      pathLengthM: number;
+    } | null = null;
+
     let bestBlockedAttempt: {
       waypoints: Vec2[];
       targetExitId: string;
@@ -457,6 +470,7 @@ function buildAgentEgressWaypoints(
     const rowStepZ = Number((seatPos[1] - 0.32).toFixed(3));
 
     for (const exit of sortedByDist) {
+      if (exit.isBlocked) continue;
       const exitY = exit.elevationM ?? 0;
       const levelDiff = Math.abs(seatY - exitY);
 
@@ -510,14 +524,21 @@ function buildAgentEgressWaypoints(
         );
 
         if (check.clear && levelDiff <= 0.95) {
-          return {
-            waypoints: check.truncatedWaypoints,
-            targetExitId: exit.id,
-            trappedByWall: false,
-          };
+          const pathLengthM = computeWaypointChainLength(
+            seatPos,
+            check.truncatedWaypoints,
+          );
+          if (!bestReachable || pathLengthM < bestReachable.pathLengthM) {
+            bestReachable = {
+              waypoints: check.truncatedWaypoints,
+              targetExitId: exit.id,
+              pathLengthM,
+            };
+          }
+          continue;
         }
 
-        // If blocked, compute how close this attempt gets the person to the nearest exit before stopping at the barrier
+        // If blocked, record the reason so we can report an error if no reachable exit exists
         const stopWps =
           levelDiff > 0.95 && check.clear
             ? [
@@ -549,13 +570,20 @@ function buildAgentEgressWaypoints(
       }
     }
 
-    // No exit can be reached without phasing through a wall/parapet or jumping off a gallery:
-    // navigate as close as physically possible to the nearest exit and stop!
+    if (bestReachable) {
+      return {
+        waypoints: bestReachable.waypoints,
+        targetExitId: bestReachable.targetExitId,
+        trappedByWall: false,
+      };
+    }
+
+    // No reachable exit exists for this person: report error!
     return {
       waypoints: bestBlockedAttempt?.waypoints ?? [[seatPos[0], seatPos[1]]],
       targetExitId: bestBlockedAttempt?.targetExitId ?? sortedByDist[0]!.id,
       trappedByWall: true,
-      blockingWallId: bestBlockedAttempt?.blockerId ?? 'wall_barrier',
+      blockingWallId: bestBlockedAttempt?.blockerId ?? 'no_reachable_exit',
     };
   }
 
