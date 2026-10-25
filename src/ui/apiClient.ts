@@ -140,7 +140,7 @@ export function createLocalFixtureRepairPreviewRun(
   ) {
     const isBunched =
       baselineSnapshot.sceneId === 'scene_community_hall_24_bunched';
-    const patch = isBunched
+    const rawPatch = isBunched
       ? createBunchedEmergencyReferencePatch(
           'preview_dev_fixture',
           baselineSnapshot.sceneHash,
@@ -149,6 +149,18 @@ export function createLocalFixtureRepairPreviewRun(
           'preview_dev_fixture',
           baselineSnapshot.sceneHash,
         );
+    const validObjectIds = new Set(baselineSnapshot.objects.map((o) => o.id));
+    const validGroupIds = new Set(
+      baselineSnapshot.chairGroups.map((g) => g.id),
+    );
+    const patch: LayoutPatch = {
+      ...rawPatch,
+      operations: rawPatch.operations.filter((op) =>
+        op.targetType === 'group'
+          ? validGroupIds.has(op.targetId)
+          : validObjectIds.has(op.targetId),
+      ),
+    };
     const validated = applyAndValidatePatch(
       baselineSnapshot,
       baselineSnapshot,
@@ -408,6 +420,14 @@ export function createLocalFixtureRepairPreviewRun(
         deltaYawDeg: 0,
         reason:
           'Clear central sightline corridor between Row 1 chairs for shorter seated viewer at Seat R2-1 within 0.60m single-op limit.',
+      },
+      {
+        targetType: 'object',
+        targetId: 'obj_chair_r2_c1',
+        deltaPositionM: [0, 0.10, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Elevate Row 2 chair by 0.10m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant ramp slope.',
       },
     ],
   };

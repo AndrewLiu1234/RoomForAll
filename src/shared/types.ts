@@ -250,8 +250,8 @@ export interface SceneSnapshot {
 export interface PatchOperation {
   targetType: 'object' | 'group';
   targetId: string;
-  /** Horizontal translation [dx, 0, dz] in 0.05m steps, |dx| <= 0.60, |dz| <= 0.60 */
-  deltaPositionM: [number, 0, number];
+  /** Translation [dx, dy, dz] in 0.05m steps, |dx| <= 0.60, |dy| <= 0.60, |dz| <= 0.60 */
+  deltaPositionM: [number, number, number];
   /** Yaw delta in degrees, |deltaYawDeg| <= 10 */
   deltaYawDeg: number;
   reason: string;
@@ -286,6 +286,7 @@ export type StructuralErrorCode =
   | 'DUPLICATE_ASSIGNMENT'
   | 'INCOMPATIBLE_PLACE'
   | 'MISSING_REFERENCE'
+  | 'TIERED_SEATING_VIOLATION'
   | 'PATCH_LIMIT_EXCEEDED'
   | 'OVERLAPPING_PATCH_TARGETS'
   | 'STALE_SCENE_HASH'
@@ -557,6 +558,7 @@ export interface BlindCritiquePayload {
   routes: RouteCorridor[];
   exits?: VenueExitPortal[];
   target: PresentationTarget;
+  roomBounds: AABB3D;
   patchConstraints: {
     readonly maxOperations: number;
     readonly translationStepM: number;

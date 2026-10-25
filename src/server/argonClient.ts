@@ -134,7 +134,7 @@ const LAYOUT_PATCH_SCHEMA: Schema = {
             type: Type.ARRAY,
             items: { type: Type.NUMBER },
             description:
-              '[dx, 0, dz] in 0.05m increments, |dx| <= 0.60, |dz| <= 0.60.',
+              '[dx, dy, dz] in 0.05m increments. |dx|<=0.60, |dy|<=0.60, |dz|<=0.60. For chairGroups, dy adjusts row elevation for tiered seating.',
           },
           deltaYawDeg: {
             type: Type.NUMBER,
@@ -366,6 +366,11 @@ function parseOperations(rawOperations: unknown): PatchOperation[] {
       Number.isFinite(rec.deltaPositionM[0])
         ? rec.deltaPositionM[0]
         : 0;
+    const dy =
+      typeof rec.deltaPositionM[1] === 'number' &&
+      Number.isFinite(rec.deltaPositionM[1])
+        ? rec.deltaPositionM[1]
+        : 0;
     const dz =
       typeof rec.deltaPositionM[2] === 'number' &&
       Number.isFinite(rec.deltaPositionM[2])
@@ -383,7 +388,7 @@ function parseOperations(rawOperations: unknown): PatchOperation[] {
     operations.push({
       targetType,
       targetId,
-      deltaPositionM: [dx, 0, dz],
+      deltaPositionM: [dx, dy, dz],
       deltaYawDeg,
       reason,
     });
@@ -392,6 +397,9 @@ function parseOperations(rawOperations: unknown): PatchOperation[] {
 }
 
 export function buildCall1Prompt(blindPayload: BlindCritiquePayload): string {
+  const ceilingY = blindPayload.roomBounds?.max[1] ?? 3.8;
+  const maxPlatformY = (ceilingY - 3.374).toFixed(2);
+
   return [
     'You are Argon, the visual accessibility, sightline, and emergency evacuation reviewer for VenuePilot (PRD v2.1).',
     'Inspect the attached baseline venue tour video clip (which includes an overhead seating & emergency evacuation flow view followed by attendee POVs) and the structured scene context below.',
@@ -404,9 +412,16 @@ export function buildCall1Prompt(blindPayload: BlindCritiquePayload): string {
     'STRICT PATCH CONSTRAINTS:',
     `- Maximum ${PATCH_CONSTRAINTS.maxOperations} operations on non-overlapping targets (never target both a chairGroup and one of its memberObjectIds).`,
     `- Only target IDs listed in editableObjects (targetType: "object") or chairGroups (targetType: "group").`,
-    `- Horizontal translation deltaPositionM must be [dx, 0, dz] in ${PATCH_CONSTRAINTS.translationStepM} m increments with |dx| <= ${PATCH_CONSTRAINTS.maxAxisDeltaM} m and |dz| <= ${PATCH_CONSTRAINTS.maxAxisDeltaM} m.`,
+    `- Translation deltaPositionM must be [dx, dy, dz] in ${PATCH_CONSTRAINTS.translationStepM} m increments with |dx| <= ${PATCH_CONSTRAINTS.maxAxisDeltaM} m, |dy| <= ${PATCH_CONSTRAINTS.maxAxisDeltaM} m, and |dz| <= ${PATCH_CONSTRAINTS.maxAxisDeltaM} m.`,
     `- Yaw change |deltaYawDeg| <= ${PATCH_CONSTRAINTS.maxYawDeltaDeg} degrees.`,
     `- Total Euclidean horizontal displacement from baselineTransform must remain <= ${PATCH_CONSTRAINTS.maxTotalDisplacementFromBaselineM} m.`,
+    `- Aisle Safety Rule: Do NOT shift chairGroups horizontally (dx or dz) into circulation corridors or toward the center aisle, as this blocks attendee approach routes and causes automatic patch rejection.`,
+    `- Tiered Seating Priority: To improve sightlines across rows, elevate rear rows vertically using dy in deltaPositionM for chairGroups (e.g., group_row_2 = [0, 0.10, 0], group_row_3 = [0, 0.20, 0], group_row_4 = [0, 0.30, 0]):`,
+    `  * Rear rows (further from stage/screen along +Z) must have strictly higher elevation than front rows: Y(Row 1) < Y(Row 2) < Y(Row 3) < Y(Row 4).`,
+    `  * Elevation steps between successive rows should be approximately equal (e.g., +0.10m per row).`,
+    `  * Maximum ADA ramp incline between successive rows must not exceed 1:12 (slope <= 0.083, dy <= dz / 12).`,
+    `  * Headroom: Standing audience members (1.85m tall) must have at least 5 feet (1.52m) of headroom clearance below the ceiling on the highest platform (max platform Y <= ${maxPlatformY}m under ${ceilingY}m ceiling).`,
+    `- Wheelchair & Prop Clearance: Relocate movable props (welcome sign, catering table, AV equipment cart) to clear obstructed sightlines and wheelchair turning circles.`,
     '- Every diagnosis item must reference a valid viewId and timestampSec from evidenceManifest.keyframes.',
     '',
     'BLIND CRITIQUE SCENE PAYLOAD (JSON):',

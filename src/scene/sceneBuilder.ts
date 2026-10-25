@@ -228,6 +228,269 @@ export function buildVenueThreeScene(
   eastWall.position.set(maxX + 0.05, sideRailHeight / 2, roomCenterZ);
   scene.add(eastWall);
 
+  // 2b. Tiered Seating Stepped Platforms & Accessible Outside Ramps
+  const audienceObjects = snapshot.objects.filter(
+    (o) => o.category === 'movable_chair' || o.category === 'wheelchair_bay_frame',
+  );
+  if (audienceObjects.length > 0) {
+    const sortedChairs = [...audienceObjects].sort(
+      (a, b) => a.transform.position[2] - b.transform.position[2],
+    );
+
+    interface VisualRowTier {
+      nominalZ: number;
+      objects: SceneObject[];
+      elevationY: number;
+    }
+
+    const visualTiers: VisualRowTier[] = [];
+    for (const obj of sortedChairs) {
+      const oz = obj.transform.position[2];
+      const existing = visualTiers.find((t) => Math.abs(t.nominalZ - oz) <= 0.50);
+      if (existing) {
+        existing.objects.push(obj);
+        existing.nominalZ =
+          existing.objects.reduce((s, o) => s + o.transform.position[2], 0) /
+          existing.objects.length;
+      } else {
+        visualTiers.push({ nominalZ: oz, objects: [obj], elevationY: 0 });
+      }
+    }
+
+    for (const tier of visualTiers) {
+      tier.elevationY =
+        tier.objects.reduce((s, o) => s + o.transform.position[1], 0) /
+        tier.objects.length;
+    }
+
+    const tiersGroup = new THREE.Group();
+    tiersGroup.name = 'tiered_seating_platforms_and_ramps';
+
+    // Rich auditorium materials with optical contrast
+    const platformDeckMat = new THREE.MeshStandardMaterial({
+      color: 0x24324a,
+      roughness: 0.68,
+      metalness: 0.2,
+    });
+    const platformFasciaMat = new THREE.MeshStandardMaterial({
+      color: 0x161e2e,
+      roughness: 0.88,
+      metalness: 0.1,
+    });
+    const nosingMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      roughness: 0.35,
+      metalness: 0.15,
+    });
+    const stepLedMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+    });
+    const rampDeckMat = new THREE.MeshStandardMaterial({
+      color: 0x1d4ed8,
+      roughness: 0.65,
+      metalness: 0.15,
+    });
+    const rampCurbMat = new THREE.MeshStandardMaterial({
+      color: 0x1e3a8a,
+      roughness: 0.55,
+      metalness: 0.2,
+    });
+    const handrailMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      roughness: 0.25,
+      metalness: 0.85,
+    });
+    const tactileYellowMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      roughness: 0.45,
+    });
+    const wcTerraceMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.7,
+      metalness: 0.2,
+    });
+
+    // 1. Render a visible raised platform for EVERY row
+    for (let tierIdx = 0; tierIdx < visualTiers.length; tierIdx++) {
+      const tier = visualTiers[tierIdx]!;
+      // Only include movable chairs for the main row platform (wheelchair bays have dedicated terrace pads)
+      const rowChairs = tier.objects.filter((o) => o.category === 'movable_chair');
+      const objectsForPlatform = rowChairs.length > 0 ? rowChairs : tier.objects;
+
+      let tierMinX = Infinity;
+      let tierMaxX = -Infinity;
+      let tierMinZ = Infinity;
+      let tierMaxZ = -Infinity;
+
+      for (const o of objectsForPlatform) {
+        tierMinX = Math.min(tierMinX, o.transform.position[0] - 0.45);
+        tierMaxX = Math.max(tierMaxX, o.transform.position[0] + 0.45);
+        tierMinZ = Math.min(tierMinZ, o.transform.position[2] - 0.45);
+        tierMaxZ = Math.max(tierMaxZ, o.transform.position[2] + 0.45);
+      }
+
+      const pW = Math.max(1.8, tierMaxX - tierMinX);
+      const pD = Math.max(1.1, tierMaxZ - tierMinZ);
+      // Every row has a raised platform: elevated rows rise to tier.elevationY; base row has 0.04m base platform
+      const pH = Math.max(0.04, tier.elevationY);
+      const pCenterX = (tierMinX + tierMaxX) / 2;
+      const pCenterZ = (tierMinZ + tierMaxZ) / 2;
+
+      // Platform deck & riser block
+      const platformGeo = new THREE.BoxGeometry(pW, pH, pD);
+      const platformMesh = new THREE.Mesh(platformGeo, platformDeckMat);
+      platformMesh.position.set(pCenterX, pH / 2, pCenterZ);
+      platformMesh.name = `tiered_riser_platform_z_${tier.nominalZ.toFixed(2)}`;
+      tiersGroup.add(platformMesh);
+
+      // Front vertical fascia face
+      const fasciaGeo = new THREE.BoxGeometry(pW, pH, 0.02);
+      const fasciaMesh = new THREE.Mesh(fasciaGeo, platformFasciaMat);
+      fasciaMesh.position.set(pCenterX, pH / 2, tierMinZ);
+      tiersGroup.add(fasciaMesh);
+
+      // High-visibility amber tactile safety nosing strip along front top edge
+      const nosingGeo = new THREE.BoxGeometry(pW, 0.012, 0.045);
+      const nosingMesh = new THREE.Mesh(nosingGeo, nosingMat);
+      nosingMesh.position.set(pCenterX, pH + 0.006, tierMinZ + 0.022);
+      tiersGroup.add(nosingMesh);
+
+      // Illuminated step LED accent line along step front
+      if (pH > 0.06) {
+        const stepLedGeo = new THREE.BoxGeometry(pW - 0.1, 0.008, 0.015);
+        const stepLedMesh = new THREE.Mesh(stepLedGeo, stepLedMat);
+        stepLedMesh.position.set(pCenterX, 0.01, tierMinZ - 0.005);
+        tiersGroup.add(stepLedMesh);
+      }
+    }
+
+    // 2. Outside Accessible Ramps Leading Directly to Wheelchair Seats (clear of all row seating)
+    const wcObjects = snapshot.objects.filter(
+      (o) => o.category === 'wheelchair_bay_frame',
+    );
+    const minRowZ = Math.min(...visualTiers.map((t) => t.nominalZ));
+    const rampStartZ = minRowZ - 0.35; // Front entrance level
+
+    for (const wc of wcObjects) {
+      const bayX = wc.transform.position[0];
+      const bayZ = wc.transform.position[2];
+      const bayElevation = wc.transform.position[1];
+      const isWestSide = bayX < 0;
+
+      // Position the outside ramp along the outer perimeter corridor (clear of outside row chairs)
+      const rampX = isWestSide ? Math.min(bayX - 0.65, -3.65) : Math.max(bayX + 0.65, 3.65);
+      const targetElevation = Math.max(0.04, bayElevation);
+      const dz = bayZ - 0.65 - rampStartZ;
+      const dy = targetElevation;
+      const rampLength = Math.sqrt(dz * dz + dy * dy);
+      const rampWidth = 0.90;
+      const rampThickness = 0.035;
+      const slopeAngle = Math.atan2(dy, dz);
+
+      const rampMidY = dy / 2;
+      const rampMidZ = (rampStartZ + (bayZ - 0.65)) / 2;
+
+      // Sloped Ramp Slab
+      const rampGeo = new THREE.BoxGeometry(rampWidth, rampThickness, rampLength);
+      const rampMesh = new THREE.Mesh(rampGeo, rampDeckMat);
+      rampMesh.position.set(rampX, rampMidY, rampMidZ);
+      rampMesh.rotation.x = -slopeAngle;
+      rampMesh.name = `accessible_outside_ramp_${isWestSide ? 'west' : 'east'}`;
+      tiersGroup.add(rampMesh);
+
+      // Protective ADA Safety Curbs (0.05m high) along inner and outer edges (no tall rails)
+      const curbWidth = 0.04;
+      const curbHeight = 0.05;
+      const curbGeo = new THREE.BoxGeometry(curbWidth, curbHeight, rampLength);
+
+      const innerCurb = new THREE.Mesh(curbGeo, rampCurbMat);
+      const innerOffset = isWestSide ? rampWidth / 2 - curbWidth / 2 : -(rampWidth / 2 - curbWidth / 2);
+      innerCurb.position.set(rampX + innerOffset, rampMidY + curbHeight / 2, rampMidZ);
+      innerCurb.rotation.x = -slopeAngle;
+      tiersGroup.add(innerCurb);
+
+      const outerCurb = new THREE.Mesh(curbGeo, rampCurbMat);
+      const outerOffset = isWestSide ? -(rampWidth / 2 - curbWidth / 2) : rampWidth / 2 - curbWidth / 2;
+      outerCurb.position.set(rampX + outerOffset, rampMidY + curbHeight / 2, rampMidZ);
+      outerCurb.rotation.x = -slopeAngle;
+      tiersGroup.add(outerCurb);
+
+      // Tactile Indicator Pads (TWSI) at bottom and top landings
+      const twsiGeo = new THREE.BoxGeometry(rampWidth - 0.1, 0.008, 0.55);
+      const bottomTwsi = new THREE.Mesh(twsiGeo, tactileYellowMat);
+      bottomTwsi.position.set(rampX, 0.004, rampStartZ - 0.3);
+      tiersGroup.add(bottomTwsi);
+
+      const topTwsi = new THREE.Mesh(twsiGeo, tactileYellowMat);
+      topTwsi.position.set(rampX, targetElevation + 0.004, bayZ - 0.65);
+      tiersGroup.add(topTwsi);
+
+      // Dedicated Wheelchair Terrace Platform under the wheelchair bay (connecting to the ramp)
+      const terraceW = Math.max(1.40, Math.abs(bayX - rampX) + rampWidth);
+      const terraceCenterX = (bayX + rampX) / 2;
+      const terraceD = 1.65;
+      const terraceGeo = new THREE.BoxGeometry(terraceW, targetElevation, terraceD);
+      const terraceMesh = new THREE.Mesh(terraceGeo, wcTerraceMat);
+      terraceMesh.position.set(terraceCenterX, targetElevation / 2, bayZ);
+      terraceMesh.name = `accessible_wheelchair_terrace_${isWestSide ? 'w1' : 'w2'}`;
+      tiersGroup.add(terraceMesh);
+
+      // High-contrast accessibility perimeter boundary around wheelchair bay
+      const borderGeo = new THREE.BoxGeometry(1.35, 0.006, terraceD);
+      const borderMesh = new THREE.Mesh(borderGeo, rampDeckMat);
+      borderMesh.position.set(bayX, targetElevation + 0.003, bayZ);
+      tiersGroup.add(borderMesh);
+    }
+
+    // 3. Intermediate connecting aisle ramps between tier steps
+    for (let i = 0; i < visualTiers.length - 1; i++) {
+      const front = visualTiers[i]!;
+      const rear = visualTiers[i + 1]!;
+      const dy = rear.elevationY - front.elevationY;
+      if (dy > 0.005) {
+        const dz = rear.nominalZ - front.nominalZ;
+        const rampLength = Math.sqrt(dz * dz + dy * dy);
+        const rampWidth = 0.95;
+        const rampThickness = 0.03;
+        const slopeAngle = Math.atan2(dy, dz);
+
+        const rampX = -2.85;
+        const rampMidY = (front.elevationY + rear.elevationY) / 2;
+        const rampMidZ = (front.nominalZ + rear.nominalZ) / 2;
+
+        const rampGeo = new THREE.BoxGeometry(rampWidth, rampThickness, rampLength);
+        const rampMesh = new THREE.Mesh(rampGeo, rampDeckMat);
+        rampMesh.position.set(rampX, rampMidY, rampMidZ);
+        rampMesh.rotation.x = -slopeAngle;
+        rampMesh.name = `accessible_aisle_ramp_${i}_to_${i + 1}`;
+        tiersGroup.add(rampMesh);
+
+        const curbWidth = 0.04;
+        const curbHeight = 0.05;
+        const curbGeo = new THREE.BoxGeometry(curbWidth, curbHeight, rampLength);
+        const leftCurb = new THREE.Mesh(curbGeo, rampCurbMat);
+        leftCurb.position.set(
+          rampX - rampWidth / 2 + curbWidth / 2,
+          rampMidY + curbHeight / 2,
+          rampMidZ,
+        );
+        leftCurb.rotation.x = -slopeAngle;
+        tiersGroup.add(leftCurb);
+
+        const rightCurb = new THREE.Mesh(curbGeo, rampCurbMat);
+        rightCurb.position.set(
+          rampX + rampWidth / 2 - curbWidth / 2,
+          rampMidY + curbHeight / 2,
+          rampMidZ,
+        );
+        rightCurb.rotation.x = -slopeAngle;
+        tiersGroup.add(rightCurb);
+      }
+    }
+
+    scene.add(tiersGroup);
+  }
+
   // 3. Visible Presentation Target Panel (PRD §6: must match scored target region)
   const targetGroup = new THREE.Group();
   targetGroup.name = snapshot.target.id;

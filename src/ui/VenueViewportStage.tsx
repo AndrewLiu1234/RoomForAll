@@ -490,6 +490,7 @@ export function VenueViewportStage({
                 : 0xef4444
             : 0x0ea5e9;
 
+        const chairElevation = Math.max(0.04, obj.transform.position[1]);
         const ringGeo = new THREE.RingGeometry(
           isSelectedOccupant || isSelectedEmpty ? 0.22 : 0.17,
           isSelectedOccupant || isSelectedEmpty ? 0.30 : 0.24,
@@ -509,6 +510,27 @@ export function VenueViewportStage({
           attendeeId: occupant?.attendeeId,
         };
         scene.add(ringMesh);
+
+        // Final approach segment from routeAnchorPoint to seat
+        if (occupant) {
+          const approachPts = [
+            new THREE.Vector3(
+              place.routeAnchorPoint[0],
+              chairElevation + 0.01,
+              place.routeAnchorPoint[1],
+            ),
+            new THREE.Vector3(
+              obj.transform.position[0],
+              chairElevation + 0.01,
+              obj.transform.position[2],
+            ),
+          ];
+          const appGeo = new THREE.BufferGeometry().setFromPoints(approachPts);
+          const appMat = new THREE.LineBasicMaterial({
+            color: attEval?.routeStatus === 'blocked' ? 0xef4444 : 0x22c55e,
+          });
+          scene.add(new THREE.Line(appGeo, appMat));
+        }
 
         if (!occupant || isSelectedOccupant) {
           const beaconMat = new THREE.MeshBasicMaterial({
