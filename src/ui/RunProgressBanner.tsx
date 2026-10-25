@@ -9,7 +9,7 @@ import type {
   GlbVenueParseReport,
 } from '../scene/index.js';
 
-export type VenuePresetMode = 'prepared_24' | 'dev_4' | 'custom_glb';
+export type VenuePresetMode = 'prepared_24' | 'dev_4' | 'custom_glb' | 'classroom_50';
 
 export interface RunProgressBannerProps {
   activeRun: RunRecord | null;
@@ -156,6 +156,16 @@ export function RunProgressBanner({
                 onClick={() => onSelectVenuePreset('prepared_24')}
               >
                 24-Place Village Hall
+              </button>
+              <button
+                type="button"
+                className={`vp-btn ${venuePreset === 'classroom_50' ? 'vp-btn-primary' : ''}`}
+                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
+                disabled={isRunning || isCapturingClip}
+                onClick={() => onSelectVenuePreset('classroom_50')}
+                title="Load the 50-Seat University Lecture Classroom (smallClassroom.blend / smallClassroom.glb) with 5 curved oak tiers, 2 exits, and natural obstructions"
+              >
+                50-Seat Classroom (.glb)
               </button>
               <button
                 type="button"
@@ -335,7 +345,8 @@ export function RunProgressBanner({
       )}
 
       {/* GLB Auto-Labeler Summary Strip (shown when viewing an auto-parsed .glb venue) */}
-      {glbParseReport && venuePreset === 'custom_glb' && (
+      {glbParseReport &&
+        (venuePreset === 'custom_glb' || venuePreset === 'classroom_50') && (
         <div
           style={{
             display: 'flex',
