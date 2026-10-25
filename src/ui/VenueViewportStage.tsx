@@ -1,29 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   INSPECTION_CAMERA,
   getAttendeeCameraPose,
   type Evaluation,
+  type EvacuationMode,
   type ProfileId,
-  type SceneSnapshot,
 } from '../shared/index.js';
+import { simulateEvacuation } from '../evaluation/index.js';
 import {
   disposeVenueScene,
   getGlbAlignmentForScene,
   getUploadedGlbBytesForScene,
   getUploadedGlbGroupForScene,
+  updateSceneEvacuationStep,
   type VenueViewportProps,
 } from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
 import { computeAttendeeSampleVisibilityMask } from './localEvaluatorFallback.js';
-import {
-  AuditoriumControlPanel,
-  DEFAULT_AUDITORIUM_LOOK_SETTINGS,
-  applyLookSettingsToScene,
-  type AuditoriumLookSettings,
-  type CameraPresetSpec,
-} from './AuditoriumControlPanel.js';
 
 export type ViewportCameraMode = 'overview' | 'attendee_pov' | 'flythrough';
 
@@ -36,6 +31,22 @@ export interface InteractiveViewportStageProps
   onToggleSightlineOverlays: () => void;
   onAddAttendeeAtPlace?: (placeId: string, profileId?: ProfileId) => void;
   onRemoveAttendee?: (attendeeId: string) => void;
+}
+
+function formatShortSeat(placeId: string, fallbackLabel?: string): string {
+  if (fallbackLabel) {
+    const match = fallbackLabel.match(/\b(R\d+-C\d+|R\d+-\d+|W-?\d+|Bay\s*\d+)\b/i);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+  return placeId
+    .replace(/^place_/, '')
+    .replace(/_/g, '-')
+    .toUpperCase();
+}
+
+function cleanGuestName(rawLabel: string): string {
+  const idx = rawLabel.indexOf('(');
+  return idx > 0 ? rawLabel.slice(0, idx).trim() : rawLabel.trim();
 }
 
 export function VenueViewportStage({
@@ -55,14 +66,12 @@ export function VenueViewportStage({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const renderFrameRef = useRef<(() => void) | null>(null);
+  const attendeeProxyNodesRef = useRef<Map<string, THREE.Object3D>>(new Map());
+  const defaultDistance = snapshot.places.length > 8 ? 10.6 : 7.2;
 
   const [selectedEmptyPlaceId, setSelectedEmptyPlaceId] = useState<
     string | null
   >(null);
-  const [lookSettings, setLookSettings] = useState<AuditoriumLookSettings>(
-    DEFAULT_AUDITORIUM_LOOK_SETTINGS,
-  );
-  const [hideAllUi, setHideAllUi] = useState<boolean>(false);
   const [flyHudReadout, setFlyHudReadout] = useState<{
     pos: [number, number, number];
     turbo: boolean;
@@ -71,6 +80,20 @@ export function VenueViewportStage({
     turbo: false,
   });
 
+  const [evacMode, setEvacMode] = useState<EvacuationMode>('none');
+  const [evacTimeSec, setEvacTimeSec] = useState<number>(0);
+  const [isPlayingEvac, setIsPlayingEvac] = useState<boolean>(false);
+  const [evacCounts, setEvacCounts] = useState<{
+    exitedCount: number;
+    queuingCount: number;
+    activeCount: number;
+  }>({ exitedCount: 0, queuingCount: 0, activeCount: snapshot.roster.length });
+
+  const evacSimResult = useMemo(() => {
+    if (evacMode === 'none') return null;
+    return simulateEvacuation(snapshot, evacMode);
+  }, [snapshot, evacMode]);
+
   const [orbitAngles, setOrbitAngles] = useState<{
     azimuthRad: number;
     polarRad: number;
@@ -78,7 +101,7 @@ export function VenueViewportStage({
   }>(() => ({
     azimuthRad: 0.38,
     polarRad: 0.92,
-    distanceM: snapshot.places.length > 8 ? 11.5 : 7.4,
+    distanceM: defaultDistance,
   }));
 
   const flyPoseRef = useRef<{
@@ -94,7 +117,6 @@ export function VenueViewportStage({
   const pressedKeysRef = useRef<Set<string>>(new Set());
   const viewModeRef = useRef<ViewportCameraMode>(viewMode);
   viewModeRef.current = viewMode;
-
   const onToggleViewModeRef = useRef(onToggleViewMode);
   onToggleViewModeRef.current = onToggleViewMode;
 
@@ -102,7 +124,7 @@ export function VenueViewportStage({
     setOrbitAngles({
       azimuthRad: 0.38,
       polarRad: 0.92,
-      distanceM: snapshot.places.length > 8 ? 11.5 : 7.4,
+      distanceM: snapshot.places.length > 8 ? 10.6 : 7.2,
     });
     setSelectedEmptyPlaceId(null);
     flyPoseRef.current = {
@@ -132,11 +154,53 @@ export function VenueViewportStage({
   const selectedEval = selectedAttendeeId
     ? evaluation.attendees[selectedAttendeeId]
     : undefined;
+  const selectedProfile = selectedAttendee
+    ? snapshot.profiles[selectedAttendee.profileId]
+    : undefined;
+  const selectedPlace = selectedAttendee
+    ? snapshot.places.find((p) => p.id === selectedAttendee.assignedPlaceId)
+    : undefined;
   const selectedEmptyPlace = selectedEmptyPlaceId
     ? snapshot.places.find((p) => p.id === selectedEmptyPlaceId)
     : undefined;
 
-  // 1. Mount / Unmount Effect: Single persistent WebGLRenderer + WASD/E/C/Shift Flythrough loop
+  const obstructedAttendees = useMemo(
+    () =>
+      snapshot.roster.filter(
+        (m) => evaluation.attendees[m.attendeeId]?.clearAndUsable === false,
+      ),
+    [snapshot.roster, evaluation.attendees],
+  );
+
+  const stepAttendee = (delta: number): void => {
+    if (!onSelectAttendee || snapshot.roster.length === 0) return;
+    const currentIdx = snapshot.roster.findIndex(
+      (a) => a.attendeeId === selectedAttendeeId,
+    );
+    const nextIdx =
+      (Math.max(0, currentIdx) + delta + snapshot.roster.length) %
+      snapshot.roster.length;
+    const nextMember = snapshot.roster[nextIdx];
+    if (nextMember) {
+      setSelectedEmptyPlaceId(null);
+      onSelectAttendee(nextMember.attendeeId);
+    }
+  };
+
+  const jumpToNextIssue = (): void => {
+    if (!onSelectAttendee || obstructedAttendees.length === 0) return;
+    const idx = obstructedAttendees.findIndex(
+      (a) => a.attendeeId === selectedAttendeeId,
+    );
+    const nextIssue =
+      obstructedAttendees[(idx + 1) % obstructedAttendees.length];
+    if (nextIssue) {
+      setSelectedEmptyPlaceId(null);
+      onSelectAttendee(nextIssue.attendeeId);
+    }
+  };
+
+  // 1. Mount / Unmount Effect: Persistent WebGLRenderer + WASD/E/C/Shift Flythrough loop
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof document === 'undefined') return;
@@ -191,7 +255,6 @@ export function VenueViewportStage({
       const key = e.key.toLowerCase();
       if (!FLY_KEYS.has(key)) return;
 
-      // If user presses W/A/S/D/E/C while in overview mode, smoothly initialize flythrough from current camera pose!
       if (viewModeRef.current !== 'flythrough' && key !== 'shift') {
         const cam = cameraRef.current;
         if (cam) {
@@ -238,10 +301,8 @@ export function VenueViewportStage({
         const stepM = speedMps * dtSec;
 
         const yaw = flyPoseRef.current.yawRad;
-        // Forward vector on horizontal XZ plane (0 yaw faces -Z: [-sin(yaw), 0, -cos(yaw)])
         const fwdX = -Math.sin(yaw);
         const fwdZ = -Math.cos(yaw);
-        // Right vector on horizontal XZ plane ([cos(yaw), 0, -sin(yaw)])
         const rightX = Math.cos(yaw);
         const rightZ = -Math.sin(yaw);
 
@@ -334,7 +395,7 @@ export function VenueViewportStage({
     };
   }, []);
 
-  // 2. Scene Rebuild Effect: Rebuilds scene geometry when snapshot, selection, viewMode, or overlays change
+  // 2. Scene Rebuild Effect
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -347,7 +408,17 @@ export function VenueViewportStage({
       forBlindEvidenceCapture: false,
     });
 
-    // If uploaded .glb bytes exist but pre-parsed group wasn't cached yet, parse asynchronously once
+    const proxyMap = new Map<string, THREE.Object3D>();
+    scene.traverse((child) => {
+      if (
+        child.name.startsWith('proxy_attendee_torso_') &&
+        child.userData?.ownerAttendeeId
+      ) {
+        proxyMap.set(child.userData.ownerAttendeeId as string, child);
+      }
+    });
+    attendeeProxyNodesRef.current = proxyMap;
+
     let cancelled = false;
     const cachedGroup = getUploadedGlbGroupForScene(snapshot.sceneId);
     const rawGlbBytes = getUploadedGlbBytesForScene(snapshot.sceneId);
@@ -386,11 +457,10 @@ export function VenueViewportStage({
     );
 
     if (viewMode !== 'attendee_pov') {
-      // Shared geometries for 3D Seat Indicators across all parsed chairs on all 3D levels
       const seatBeaconGeo = new THREE.SphereGeometry(0.095, 16, 16);
       const seatStemGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.24, 8);
 
-      // Render interactive 3D Seat Indicators for ALL parsed places (occupied AND empty!) at their true 3D [x, y, z] elevation
+      // Render 3D Seat Indicators for ALL parsed places at their true 3D [x, y, z] elevation
       for (const place of snapshot.places) {
         const obj = snapshot.objects.find((o) => o.id === place.objectId);
         if (!obj) continue;
@@ -420,7 +490,6 @@ export function VenueViewportStage({
                 : 0xef4444
             : 0x0ea5e9;
 
-        // 1. 3D Seat Cushion Ring directly on the chair's seat pan (baseY + seatHeightM + 0.02)
         const ringGeo = new THREE.RingGeometry(
           isSelectedOccupant || isSelectedEmpty ? 0.22 : 0.17,
           isSelectedOccupant || isSelectedEmpty ? 0.30 : 0.24,
@@ -441,7 +510,6 @@ export function VenueViewportStage({
         };
         scene.add(ringMesh);
 
-        // 2. 3D Floating Seat Beacon Orb + Stem right above the chair seat cushion so every seat across all 3D tiers is visibly marked!
         if (!occupant || isSelectedOccupant) {
           const beaconMat = new THREE.MeshBasicMaterial({
             color: isSelectedEmpty ? 0xfacc15 : indicatorColor,
@@ -468,7 +536,6 @@ export function VenueViewportStage({
           scene.add(stemMesh);
         }
 
-        // 3. Pickable 3D hit cylinder centered on the chair's 3D seat cushion & backrest
         const hitGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.65, 16);
         const hitMat = new THREE.MeshBasicMaterial({
           color: 0x38bdf8,
@@ -518,7 +585,7 @@ export function VenueViewportStage({
           ghostMesh.rotation.x = -Math.PI / 2;
           ghostMesh.position.set(
             obj.baselineTransform.position[0],
-            0.035,
+            obj.baselineTransform.position[1] + 0.035,
             obj.baselineTransform.position[2],
           );
           scene.add(ghostMesh);
@@ -526,7 +593,7 @@ export function VenueViewportStage({
           const dir = new THREE.Vector3(dx, 0, dz).normalize();
           const origin = new THREE.Vector3(
             obj.baselineTransform.position[0],
-            0.12,
+            obj.baselineTransform.position[1] + 0.12,
             obj.baselineTransform.position[2],
           );
           const arrow = new THREE.ArrowHelper(
@@ -549,7 +616,7 @@ export function VenueViewportStage({
       );
       const pose = getAttendeeCameraPose(snapshot, selectedAttendeeId);
 
-      const dotGeo = new THREE.SphereGeometry(0.032, 8, 8);
+      const dotGeo = new THREE.SphereGeometry(0.03, 8, 8);
       const clearMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
       const blockedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
 
@@ -581,7 +648,7 @@ export function VenueViewportStage({
           const rayMat = new THREE.LineBasicMaterial({
             color: isClear ? 0x10b981 : 0xef4444,
             transparent: true,
-            opacity: isClear ? 0.35 : 0.65,
+            opacity: isClear ? 0.32 : 0.65,
           });
           scene.add(new THREE.Line(rayGeo, rayMat));
         }
@@ -601,7 +668,7 @@ export function VenueViewportStage({
     showSightlineOverlays,
   ]);
 
-  // 3. Camera & Render Effect: Runs at 60fps during orbit/zoom/flythrough without recreating WebGLRenderer!
+  // 3. Camera & Render Effect
   useEffect(() => {
     const renderCurrentFrame = (): void => {
       const container = containerRef.current;
@@ -666,7 +733,7 @@ export function VenueViewportStage({
         camera.up.set(0, 1, 0);
         camera.updateProjectionMatrix();
 
-        const targetPivot = new THREE.Vector3(0, 0.7, -0.5);
+        const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
         const cx =
           targetPivot.x +
           orbitAngles.distanceM *
@@ -700,6 +767,51 @@ export function VenueViewportStage({
     orbitAngles,
   ]);
 
+  // Apply evacuation step whenever evacTimeSec or evacSimResult changes
+  useEffect(() => {
+    const counts = updateSceneEvacuationStep(
+      attendeeProxyNodesRef.current,
+      evacSimResult,
+      evacTimeSec,
+    );
+    setEvacCounts(counts);
+    renderFrameRef.current?.();
+  }, [evacSimResult, evacTimeSec, snapshot]);
+
+  // RequestAnimationFrame playback loop for evacuation simulation
+  useEffect(() => {
+    if (!isPlayingEvac || !evacSimResult) return;
+    let rafId = 0;
+    let lastTs = performance.now();
+
+    const tick = (now: number) => {
+      const dtSec = Math.min(0.1, (now - lastTs) / 1000);
+      lastTs = now;
+
+      setEvacTimeSec((prev) => {
+        const next = prev + dtSec;
+        if (next >= evacSimResult.totalEvacuationTimeSec + 0.4) {
+          setIsPlayingEvac(false);
+          return evacSimResult.totalEvacuationTimeSec;
+        }
+        return next;
+      });
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlayingEvac, evacSimResult]);
+
+  const handleSelectEvacMode = (nextMode: EvacuationMode): void => {
+    if (nextMode !== 'none' && viewMode === 'attendee_pov') {
+      onToggleViewMode('overview');
+    }
+    setEvacMode(nextMode);
+    setEvacTimeSec(0);
+    setIsPlayingEvac(nextMode !== 'none');
+  };
+
   const handleSwitchMode = (nextMode: ViewportCameraMode): void => {
     if (nextMode === 'flythrough' && viewMode !== 'flythrough') {
       const cam = cameraRef.current;
@@ -722,25 +834,33 @@ export function VenueViewportStage({
     onToggleViewMode(nextMode);
   };
 
+  const visPct = selectedEval
+    ? Math.round(selectedEval.sampledVisibility * 100)
+    : 100;
+  const seatBadge = selectedAttendee
+    ? formatShortSeat(selectedAttendee.assignedPlaceId, selectedPlace?.label)
+    : '';
+
   return (
     <div
       style={{
         position: 'relative',
         width: '100%',
         height: '100%',
-        minHeight: '480px',
-        background: '#090c12',
+        minHeight: '500px',
+        background: 'var(--bg-canvas)',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
-      {/* Top Viewport Overlay Controls */}
+      {/* Top Floating Viewport Bar */}
       <div
         style={{
           position: 'absolute',
           top: '14px',
-          left: '14px',
-          right: '14px',
+          left: '16px',
+          right: '16px',
           zIndex: 10,
           display: 'flex',
           flexWrap: 'wrap',
@@ -750,74 +870,178 @@ export function VenueViewportStage({
           pointerEvents: 'none',
         }}
       >
+        {/* Left: Camera Mode Switcher + Ray Overlay Toggle + Evacuation Switcher */}
         <div
+          className="vp-hud-bar"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '5px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
+            padding: '4px',
           }}
         >
+          <div className="vp-segmented" style={{ border: 'none', background: 'transparent', padding: 0 }}>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                viewMode === 'overview' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSwitchMode('overview')}
+            >
+              <span>Room Orbit</span>
+            </button>
+
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                viewMode === 'flythrough' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSwitchMode('flythrough')}
+              title="POV Flythrough: WASD lateral movement, E/C up & down, Shift 3x speed boost, mouse drag to look"
+            >
+              <span>POV Flythrough (WASD+E/C)</span>
+            </button>
+
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                viewMode === 'attendee_pov' ? 'vp-segment-btn-active' : ''
+              }`}
+              disabled={!selectedAttendee}
+              onClick={() => handleSwitchMode('attendee_pov')}
+            >
+              <span>Seat POV</span>
+            </button>
+          </div>
+
+          <div className="vp-divider-v" />
+
           <button
             type="button"
-            className={`vp-btn ${viewMode === 'overview' ? 'vp-btn-primary' : ''}`}
-            onClick={() => handleSwitchMode('overview')}
+            aria-pressed={showSightlineOverlays}
+            className="vp-segment-btn vp-focusable"
+            style={{
+              color: showSightlineOverlays
+                ? 'var(--text-primary)'
+                : 'var(--text-secondary)',
+            }}
+            onClick={onToggleSightlineOverlays}
           >
-            Room Overview (3D Orbit)
+            <span
+              className="vp-status-dot"
+              style={{
+                background: showSightlineOverlays
+                  ? 'var(--status-pass)'
+                  : 'var(--text-muted)',
+              }}
+            />
+            <span>Sightline Rays</span>
           </button>
-          <button
-            type="button"
-            className={`vp-btn ${viewMode === 'flythrough' ? 'vp-btn-primary' : ''}`}
-            onClick={() => handleSwitchMode('flythrough')}
-            title="Fly freely through the 3D venue using WASD (lateral), E/C (up/down), Shift (speed boost), and mouse drag to look"
+
+          <div className="vp-divider-v" />
+
+          {/* Egress & Emergency Evacuation Simulation Switcher */}
+          <div
+            className="vp-segmented"
+            style={{ border: 'none', background: 'transparent', padding: 0 }}
+            role="group"
+            aria-label="Evacuation simulation mode"
           >
-            POV Flythrough (WASD + E/C)
-          </button>
-          <button
-            type="button"
-            className={`vp-btn ${viewMode === 'attendee_pov' ? 'vp-btn-primary' : ''}`}
-            disabled={!selectedAttendee}
-            onClick={() => handleSwitchMode('attendee_pov')}
-          >
-            Attendee POV (90°×90° Square)
-          </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                evacMode === 'none' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSelectEvacMode('none')}
+            >
+              Seated
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                evacMode === 'normal_egress' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => handleSelectEvacMode('normal_egress')}
+            >
+              Normal Exit
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                evacMode === 'emergency_evacuation'
+                  ? 'vp-segment-btn-active'
+                  : ''
+              }`}
+              style={
+                evacMode === 'emergency_evacuation'
+                  ? {
+                      color: 'var(--status-warn-text)',
+                      background: 'var(--status-warn-bg)',
+                    }
+                  : undefined
+              }
+              onClick={() => handleSelectEvacMode('emergency_evacuation')}
+            >
+              Emergency Evac
+            </button>
+          </div>
         </div>
 
+        {/* Right: Quick Camera Presets / Next Issue Jump */}
         <div
+          className="vp-hud-bar"
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '5px 10px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
+            gap: '4px',
+            padding: '4px',
           }}
         >
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.78rem',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showSightlineOverlays}
-              onChange={onToggleSightlineOverlays}
-            />
-            Show 15×9 Target Grid &amp; Rays
-          </label>
+          {viewMode === 'overview' && (
+            <>
+              <button
+                type="button"
+                className="vp-segment-btn vp-focusable"
+                onClick={() =>
+                  setOrbitAngles({
+                    azimuthRad: 0.38,
+                    polarRad: 0.92,
+                    distanceM: defaultDistance,
+                  })
+                }
+              >
+                Stage Oblique
+              </button>
+              <button
+                type="button"
+                className="vp-segment-btn vp-focusable"
+                onClick={() =>
+                  setOrbitAngles({
+                    azimuthRad: 0,
+                    polarRad: 0.28,
+                    distanceM: defaultDistance * 1.05,
+                  })
+                }
+              >
+                Top Plan
+              </button>
+            </>
+          )}
+
+          {obstructedAttendees.length > 0 && (
+            <button
+              type="button"
+              className="vp-segment-btn vp-focusable"
+              style={{
+                color: 'var(--status-fail-text)',
+                background: 'var(--status-fail-bg)',
+              }}
+              onClick={jumpToNextIssue}
+            >
+              <span className="vp-status-dot vp-status-dot-fail" />
+              <span>Next Issue ({obstructedAttendees.length})</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -826,15 +1050,15 @@ export function VenueViewportStage({
         <div
           style={{
             position: 'absolute',
-            top: '62px',
-            left: '14px',
+            top: '60px',
+            left: '16px',
             zIndex: 10,
-            padding: '7px 12px',
+            padding: '6px 12px',
             borderRadius: 'var(--radius-card)',
             background: 'rgba(15, 23, 42, 0.88)',
             border: '1px solid rgba(56, 189, 248, 0.45)',
             color: '#e0f2fe',
-            fontSize: '0.75rem',
+            fontSize: '0.74rem',
             pointerEvents: 'none',
             display: 'flex',
             alignItems: 'center',
@@ -842,64 +1066,142 @@ export function VenueViewportStage({
           }}
         >
           <span>
-            <strong>Flythrough Controls:</strong> <code>W A S D</code> Move ·{' '}
+            <strong>Flythrough:</strong> <code>W A S D</code> Move ·{' '}
             <code>E / C</code> Up / Down · <code>Shift</code> 3× Speed ·{' '}
-            <code>Drag Mouse</code> Look Around
+            <code>Drag Mouse</code> Look
           </span>
           <span className="mono" style={{ color: '#38bdf8' }}>
-            Pos: [{flyHudReadout.pos.map((v) => v.toFixed(1)).join(', ')}]m{' '}
+            [{flyHudReadout.pos.map((v) => v.toFixed(1)).join(', ')}]m{' '}
             {flyHudReadout.turbo ? '⚡3×' : ''}
           </span>
         </div>
       )}
 
-      {/* Interactive Look-Dev Control Panel (Lighting, Textures, Camera Angles, Copy Settings as JSON) */}
-      <AuditoriumControlPanel
-        settings={lookSettings}
-        onChange={(next) => {
-          setLookSettings(next);
-          if (sceneRef.current) {
-            applyLookSettingsToScene(sceneRef.current, next);
-          }
-          if (rendererRef.current) {
-            rendererRef.current.toneMappingExposure = next.camera.exposure;
-          }
-          renderFrameRef.current?.();
-        }}
-        onSelectCameraPreset={(preset: CameraPresetSpec) => {
-          const [px, py, pz] = preset.position;
-          const [tx, ty, tz] = preset.lookAt;
-          const dx = tx - px;
-          const dy = ty - py;
-          const dz = tz - pz;
-          const dist = Math.max(0.01, Math.hypot(dx, dy, dz));
-          const yaw = Math.atan2(-dx, -dz);
-          const pitch = Math.asin(Math.max(-0.95, Math.min(0.95, dy / dist)));
-          flyPoseRef.current = {
-            position: [px, py, pz],
-            yawRad: yaw,
-            pitchRad: pitch,
-          };
-          setFlyHudReadout({
-            pos: [px, py, pz],
-            turbo: false,
-          });
-          onToggleViewMode('flythrough');
-          renderFrameRef.current?.();
-        }}
-        onCaptureCleanScreenshot={() => {
-          renderFrameRef.current?.();
-          const canvas = rendererRef.current?.domElement;
-          if (!canvas) return;
-          const dataUrl = canvas.toDataURL('image/png');
-          const a = document.createElement('a');
-          a.href = dataUrl;
-          a.download = `${lookSettings.camera.activePresetId}_clean_capture.png`;
-          a.click();
-        }}
-        onHideAllUiChange={setHideAllUi}
-        hideAllUi={hideAllUi}
-      />
+      {/* Live Egress / Emergency Evacuation Telemetry HUD Banner */}
+      {evacMode !== 'none' && evacSimResult && (
+        <div
+          style={{
+            position: 'absolute',
+            top: viewMode === 'flythrough' ? '100px' : '60px',
+            left: '16px',
+            right: '16px',
+            zIndex: 9,
+            display: 'flex',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            className="vp-hud-bar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '6px 14px',
+              pointerEvents: 'auto',
+              borderColor:
+                evacMode === 'emergency_evacuation'
+                  ? evacSimResult.evacuationPass
+                    ? 'var(--status-pass-border)'
+                    : 'var(--status-fail-border)'
+                  : 'var(--border-subtle)',
+            }}
+          >
+            <button
+              type="button"
+              className="vp-btn"
+              style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+              onClick={() => {
+                if (
+                  !isPlayingEvac &&
+                  evacTimeSec >= evacSimResult.totalEvacuationTimeSec - 0.1
+                ) {
+                  setEvacTimeSec(0);
+                  setIsPlayingEvac(true);
+                } else {
+                  setIsPlayingEvac((p) => !p);
+                }
+              }}
+            >
+              {isPlayingEvac
+                ? 'Pause'
+                : evacTimeSec >= evacSimResult.totalEvacuationTimeSec - 0.1
+                  ? 'Replay'
+                  : 'Play'}
+            </button>
+
+            <input
+              type="range"
+              aria-label="Evacuation simulation timeline"
+              min={0}
+              max={evacSimResult.totalEvacuationTimeSec}
+              step={0.1}
+              value={Math.min(
+                evacTimeSec,
+                evacSimResult.totalEvacuationTimeSec,
+              )}
+              onChange={(e) => {
+                setIsPlayingEvac(false);
+                setEvacTimeSec(Number(e.target.value));
+              }}
+              style={{ width: '120px', accentColor: 'var(--accent-primary)' }}
+            />
+
+            <span className="mono" style={{ fontSize: '0.76rem' }}>
+              t={evacTimeSec.toFixed(1)}s /{' '}
+              {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
+            </span>
+
+            <div className="vp-divider-v" />
+
+            <span className="mono" style={{ fontSize: '0.75rem' }}>
+              Escaped: {evacCounts.exitedCount}/{snapshot.roster.length}
+            </span>
+
+            {evacCounts.queuingCount > 0 && (
+              <span className="vp-badge vp-badge-warn" style={{ fontSize: '0.72rem' }}>
+                Queueing: {evacCounts.queuingCount}
+              </span>
+            )}
+
+            <span
+              className={`vp-badge ${
+                evacSimResult.evacuationPass ? 'vp-badge-pass' : 'vp-badge-fail'
+              }`}
+              style={{ fontSize: '0.72rem' }}
+            >
+              Exits Open: {evacSimResult.activeExitCount}/
+              {evacSimResult.totalExitCount} · T_evac{' '}
+              {evacSimResult.totalEvacuationTimeSec.toFixed(1)}s
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* 1:1 Optical Viewfinder Badge when in Seat POV */}
+      {viewMode === 'attendee_pov' && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '64px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 8,
+            pointerEvents: 'none',
+          }}
+        >
+          <span
+            className="vp-badge vp-badge-neutral mono"
+            style={{
+              background: 'rgba(12, 15, 23, 0.78)',
+              borderColor: 'var(--border-subtle)',
+              padding: '3px 10px',
+            }}
+          >
+            90°×90° Optical Frame · 15×9 Target Grid
+          </span>
+        </div>
+      )}
 
       {/* Interactive 3D Canvas Container */}
       <div
@@ -944,9 +1246,8 @@ export function VenueViewportStage({
         onMouseUp={(e) => {
           const wasDragging = dragStateRef.current.dragging;
           dragStateRef.current.dragging = false;
-          if (!wasDragging || viewMode === 'attendee_pov') {
-            return;
-          }
+          if (!wasDragging || viewMode === 'attendee_pov') return;
+
           const dist = Math.hypot(
             e.clientX - dragStateRef.current.startX,
             e.clientY - dragStateRef.current.startY,
@@ -1011,206 +1312,208 @@ export function VenueViewportStage({
           flex: 1,
           width: '100%',
           height: '100%',
-          cursor: viewMode === 'attendee_pov' ? 'crosshair' : 'grab',
+          cursor: viewMode === 'attendee_pov' ? 'default' : 'grab',
         }}
       />
 
-      {/* Quick Seat/Bay Switcher Pill Bar & Selected Seat / Attendee HUD */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '14px',
-          left: '14px',
-          right: '14px',
-          zIndex: 10,
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          pointerEvents: 'none',
-        }}
-      >
+      {/* Sleek Bottom-Center Floating Guest / Empty-Seat Dock */}
+      {(selectedEmptyPlace || (selectedAttendee && selectedEval)) && (
         <div
           style={{
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '10px 14px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
+            position: 'absolute',
+            bottom: '16px',
+            left: '16px',
+            right: '16px',
+            zIndex: 10,
             display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: '14px',
+            justifyContent: 'center',
+            pointerEvents: 'none',
           }}
         >
-          {selectedEmptyPlace ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div>
-                <div
-                  style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}
-                >
-                  Selected Empty Parsed Seat
+          <div
+            className="vp-hud-bar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '8px 12px',
+              maxWidth: '740px',
+            }}
+          >
+            {selectedEmptyPlace ? (
+              <>
+                <div>
+                  <div
+                    style={{
+                      fontSize: '0.71rem',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    Selected Empty 3D Seat
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>
+                    {selectedEmptyPlace.label} ({selectedEmptyPlace.id})
+                  </div>
                 </div>
-                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                  {selectedEmptyPlace.label} ({selectedEmptyPlace.id})
-                </div>
-              </div>
-              {onAddAttendeeAtPlace && (
-                <button
-                  type="button"
-                  className="vp-btn vp-btn-primary"
-                  style={{ padding: '5px 10px', fontSize: '0.75rem' }}
-                  onClick={() => {
-                    onAddAttendeeAtPlace(selectedEmptyPlace.id);
-                    setSelectedEmptyPlaceId(null);
-                  }}
-                >
-                  + Add Person to {selectedEmptyPlace.label}
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              <div>
-                <div
-                  style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}
-                >
-                  Active Camera / Place ({snapshot.roster.length} of{' '}
-                  {snapshot.places.length} seats occupied)
-                </div>
-                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                  {selectedAttendee
-                    ? `${selectedAttendee.label} · ${selectedAttendee.assignedPlaceId}`
-                    : 'Click any seat ring in 3D or add a person'}
-                </div>
-              </div>
-
-              {selectedEval && (
+                {onAddAttendeeAtPlace && (
+                  <button
+                    type="button"
+                    className="vp-btn vp-btn-primary"
+                    style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+                    onClick={() => {
+                      onAddAttendeeAtPlace(selectedEmptyPlace.id);
+                      setSelectedEmptyPlaceId(null);
+                    }}
+                  >
+                    + Add Person to {selectedEmptyPlace.label}
+                  </button>
+                )}
+              </>
+            ) : (
+              selectedAttendee &&
+              selectedEval && (
                 <>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: '0.72rem',
-                        color: 'var(--text-secondary)',
-                      }}
+                  {/* Prev / Next Guest Stepper */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Previous guest"
+                      className="vp-btn"
+                      style={{ padding: '5px 8px' }}
+                      onClick={() => stepAttendee(-1)}
                     >
-                      Sampled Visibility (15×9)
-                    </div>
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Next guest"
+                      className="vp-btn"
+                      style={{ padding: '5px 8px' }}
+                      onClick={() => stepAttendee(1)}
+                    >
+                      ›
+                    </button>
+                  </div>
+
+                  <div className="vp-divider-v" />
+
+                  {/* Selected Guest Identity */}
+                  <div style={{ minWidth: 0 }}>
                     <div
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '6px',
+                        gap: '7px',
+                        fontWeight: 600,
+                        fontSize: '0.83rem',
                       }}
                     >
+                      <span>{cleanGuestName(selectedAttendee.label)}</span>
                       <span
                         className="mono"
-                        style={{ fontWeight: 700, fontSize: '0.88rem' }}
+                        style={{
+                          fontSize: '0.71rem',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          background: 'var(--bg-elevated)',
+                          border: '1px solid var(--border-subtle)',
+                          color: 'var(--text-secondary)',
+                        }}
                       >
-                        {selectedEval.visibleSamples}/{selectedEval.totalSamples}{' '}
-                        ({Math.round(selectedEval.sampledVisibility * 100)}%)
-                      </span>
-                      <span
-                        className={`vp-badge ${
-                          selectedEval.isViewClear
-                            ? 'vp-badge-pass'
-                            : 'vp-badge-fail'
-                        }`}
-                      >
-                        {selectedEval.isViewClear ? 'Clear >=122' : 'Obstructed'}
+                        {seatBadge}
                       </span>
                     </div>
-                  </div>
-
-                  <div>
                     <div
                       style={{
                         fontSize: '0.72rem',
                         color: 'var(--text-secondary)',
                       }}
                     >
-                      Eye World Pos [X, Y, Z]
-                    </div>
-                    <div className="mono" style={{ fontSize: '0.8rem' }}>
-                      [
-                      {selectedEval.eyePositionWorld
-                        .map((v) => `${v.toFixed(2)}m`)
-                        .join(', ')}
-                      ]
+                      {selectedProfile?.label ?? selectedAttendee.profileId}
                     </div>
                   </div>
-                </>
-              )}
 
-              {selectedAttendee && onRemoveAttendee && (
-                <button
-                  type="button"
-                  className="vp-btn"
-                  style={{
-                    padding: '4px 9px',
-                    fontSize: '0.73rem',
-                    borderColor: 'rgba(239, 68, 68, 0.45)',
-                    color: '#fca5a5',
-                  }}
-                  onClick={() => onRemoveAttendee(selectedAttendee.attendeeId)}
-                >
-                  Remove from Seat
-                </button>
-              )}
-            </>
-          )}
-        </div>
+                  <div className="vp-divider-v" />
 
-        {/* Fast camera jump pills */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '5px',
-            maxWidth: '520px',
-            maxHeight: '72px',
-            overflowY: 'auto',
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '6px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
-          }}
-        >
-          {snapshot.roster.map((m) => {
-            const active =
-              !selectedEmptyPlaceId && m.attendeeId === selectedAttendeeId;
-            const ev = evaluation.attendees[m.attendeeId];
-            return (
-              <button
-                key={m.attendeeId}
-                type="button"
-                className={`vp-btn ${active ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '4px 8px', fontSize: '0.73rem' }}
-                onClick={() => {
-                  setSelectedEmptyPlaceId(null);
-                  onSelectAttendee?.(m.attendeeId);
-                }}
-              >
-                <span>{m.assignedPlaceId.replace('place_', '')}</span>
-                {ev && (
-                  <span
+                  {/* Sightline Status Pill */}
+                  <div
                     style={{
-                      width: '7px',
-                      height: '7px',
-                      borderRadius: '50%',
-                      background: ev.clearAndUsable ? '#34d399' : '#f87171',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
                     }}
-                  />
-                )}
-              </button>
-            );
-          })}
+                  >
+                    <span
+                      className={`vp-badge ${
+                        selectedEval.clearAndUsable
+                          ? 'vp-badge-pass'
+                          : 'vp-badge-fail'
+                      }`}
+                    >
+                      <span
+                        className={`vp-status-dot ${
+                          selectedEval.clearAndUsable
+                            ? 'vp-status-dot-pass'
+                            : 'vp-status-dot-fail'
+                        }`}
+                      />
+                      <span>
+                        {visPct}% Sightline ({selectedEval.visibleSamples}/
+                        {selectedEval.totalSamples})
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className="vp-divider-v" />
+
+                  {/* 1-Click Toggle between Seat POV and Room Orbit */}
+                  <button
+                    type="button"
+                    className={`vp-btn ${
+                      viewMode === 'attendee_pov' ? 'vp-btn-primary' : ''
+                    }`}
+                    style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+                    onClick={() =>
+                      handleSwitchMode(
+                        viewMode === 'attendee_pov'
+                          ? 'overview'
+                          : 'attendee_pov',
+                      )
+                    }
+                  >
+                    {viewMode === 'attendee_pov'
+                      ? 'Back to Orbit'
+                      : 'Inspect POV'}
+                  </button>
+
+                  {onRemoveAttendee && (
+                    <button
+                      type="button"
+                      className="vp-btn"
+                      style={{
+                        padding: '5px 9px',
+                        fontSize: '0.73rem',
+                        color: 'var(--status-fail-text)',
+                      }}
+                      onClick={() =>
+                        onRemoveAttendee(selectedAttendee.attendeeId)
+                      }
+                    >
+                      Remove
+                    </button>
+                  )}
+                </>
+              )
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

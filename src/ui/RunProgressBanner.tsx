@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   RUN_TIMING,
+  type CaptureKeyframe,
   type RunRecord,
   type RunState,
 } from '../shared/index.js';
@@ -9,7 +10,22 @@ import type {
   GlbVenueParseReport,
 } from '../scene/index.js';
 
-export type VenuePresetMode = 'prepared_24' | 'dev_4' | 'custom_glb' | 'classroom_50';
+export type VenuePresetMode =
+  | 'prepared_24'
+  | 'bunched_emergency_24'
+  | 'dev_4'
+  | 'classroom_50'
+  | 'custom_glb';
+
+export interface ActiveCaptureProgress {
+  phase: 'baseline' | 'revision';
+  captureId: string;
+  currentViewIndex?: number;
+  totalViews?: number;
+  activeKeyframe?: CaptureKeyframe;
+  elapsedTourSec?: number;
+  totalTourSec?: number;
+}
 
 export interface RunProgressBannerProps {
   activeRun: RunRecord | null;
@@ -19,22 +35,27 @@ export interface RunProgressBannerProps {
   venuePreset?: VenuePresetMode;
   glbParseReport?: GlbVenueParseReport | null;
   glbParseProgress?: GlbParseProgressUpdate | null;
+  unmetCount?: number;
+  totalSeats?: number;
   onSelectVenuePreset?: (preset: VenuePresetMode) => void;
   onUploadGlbFile?: (file: File) => void;
   onStartLiveRun: () => void;
   onPreviewLocalRepair: () => void;
   onResetToBaseline: () => void;
+  activeCaptureProgress?: ActiveCaptureProgress | null;
+  selectedAttendeeId?: string;
+  activeViewMode?: 'overview' | 'attendee_pov' | 'flythrough';
 }
 
 const ORDERED_STATES: Array<{ state: RunState; label: string }> = [
-  { state: 'preparing', label: '1. Preparing' },
-  { state: 'capturing_baseline', label: '2. Capturing Baseline' },
-  { state: 'inspecting_baseline', label: '3. Argon Baseline Critique' },
-  { state: 'proposing', label: '4. Proposing Patch' },
-  { state: 'verifying', label: '5. Independent Verification' },
-  { state: 'rendering_revision', label: '6. Capturing Revision' },
-  { state: 'inspecting_revision', label: '7. Argon Final Inspection' },
-  { state: 'finished', label: '8. Finished' },
+  { state: 'preparing', label: 'Preparing Scene' },
+  { state: 'capturing_baseline', label: 'Recording Baseline Tour' },
+  { state: 'inspecting_baseline', label: 'Argon Visual Critique' },
+  { state: 'proposing', label: 'Synthesizing Spatial Patch' },
+  { state: 'verifying', label: 'Verifying Geometry & Rays' },
+  { state: 'rendering_revision', label: 'Recording Repaired Tour' },
+  { state: 'inspecting_revision', label: 'Final Optical Verification' },
+  { state: 'finished', label: 'Verification Complete' },
 ];
 
 export function RunProgressBanner({
@@ -45,11 +66,14 @@ export function RunProgressBanner({
   venuePreset = 'prepared_24',
   glbParseReport,
   glbParseProgress,
+  unmetCount = 0,
+  totalSeats = 24,
   onSelectVenuePreset,
   onUploadGlbFile,
   onStartLiveRun,
   onPreviewLocalRepair,
   onResetToBaseline,
+  activeCaptureProgress,
 }: RunProgressBannerProps): React.ReactElement {
   const isRunning = activeRun !== null && activeRun.state !== 'finished';
   const isParsingGlb =
@@ -59,6 +83,14 @@ export function RunProgressBanner({
   const currentIdx = activeRun
     ? ORDERED_STATES.findIndex((s) => s.state === activeRun.state)
     : -1;
+  const currentStep = currentIdx >= 0 ? ORDERED_STATES[currentIdx] : undefined;
+
+  const progressFraction =
+    activeRun?.state === 'finished'
+      ? 1
+      : currentIdx >= 0
+        ? (currentIdx + 1) / ORDERED_STATES.length
+        : 0;
 
   const remainingSec = activeRun
     ? Math.max(
@@ -67,422 +99,328 @@ export function RunProgressBanner({
       )
     : Math.ceil(RUN_TIMING.liveDeadlineMs / 1000);
 
+  const activePovLabel = activeCaptureProgress?.activeKeyframe?.label;
+
   return (
-    <header
-      style={{
-        gridColumn: '1 / -1',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-        padding: '12px 18px',
-        borderBottom: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)',
-      }}
-    >
+    <header className="vp-header">
+      {/* Left: Brand & Venue Switcher */}
+      <div className="vp-brand">
+        <div className="vp-brand-mark" aria-hidden="true">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </div>
+        <h1 className="vp-brand-title">VenuePilot</h1>
+
+        <div className="vp-divider-v" />
+
+        {onSelectVenuePreset && (
+          <div className="vp-segmented" role="group" aria-label="Venue preset">
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'prepared_24' ? 'vp-segment-btn-active' : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('prepared_24')}
+            >
+              Village Hall · 24
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'bunched_emergency_24'
+                  ? 'vp-segment-btn-active'
+                  : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('bunched_emergency_24')}
+            >
+              Bunched Evac · 24
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'classroom_50' ? 'vp-segment-btn-active' : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('classroom_50')}
+              title="Load 50-Seat Tiered Classroom (smallClassroom.glb) with 5 curved tiers, Screen_Projection_16x9 target, and 4 random people"
+            >
+              Classroom · 50 (.glb)
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'dev_4' ? 'vp-segment-btn-active' : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('dev_4')}
+            >
+              Compact Hall · 4
+            </button>
+          </div>
+        )}
+
+        {onUploadGlbFile && (
+          <label
+            className="vp-btn vp-focusable"
+            style={{
+              padding: '4px 10px',
+              fontSize: '0.73rem',
+              cursor: isRunning || isCapturingClip ? 'not-allowed' : 'pointer',
+              opacity: isRunning || isCapturingClip ? 0.5 : 1,
+            }}
+            title="Upload any binary glTF 2.0 (.glb) 3D building to create a standalone scene, auto-detect 3D chairs & Sight Target via Parallel Gemini Agents, and spawn 4 random people"
+          >
+            Upload .glb
+            <input
+              type="file"
+              accept=".glb,model/gltf-binary"
+              disabled={isRunning || isCapturingClip}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  onUploadGlbFile(file);
+                  e.target.value = '';
+                }
+              }}
+            />
+          </label>
+        )}
+      </div>
+
+      {/* Center: Live Telemetry / Status Pill */}
       <div
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
+          gap: '10px',
+          minWidth: 0,
         }}
       >
-        {/* Brand & Subtitle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {errorText ? (
           <div
+            className="vp-badge vp-badge-fail"
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              color: '#fff',
+              padding: '4px 12px',
+              fontSize: '0.75rem',
+              maxWidth: '460px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={errorText}
+          >
+            <span className="vp-status-dot vp-status-dot-fail" />
+            <span>{errorText}</span>
+          </div>
+        ) : isParsingGlb && glbParseProgress ? (
+          <div
+            className="vp-badge vp-badge-neutral"
+            style={{
+              padding: '4px 12px',
+              fontSize: '0.74rem',
+              background: 'rgba(139, 92, 246, 0.16)',
+              borderColor: 'rgba(167, 139, 250, 0.45)',
+              color: '#e9d5ff',
             }}
           >
-            VP
+            <span className="vp-live-dot" />
+            <span>
+              {glbParseProgress.label} ({glbParseProgress.percent}%)
+            </span>
           </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h1 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>
-                VenuePilot
-              </h1>
-              <span className="vp-badge vp-badge-neutral">
-                Argon Visual Audit &amp; Bounded Repair
-              </span>
-            </div>
-            <p
-              style={{
-                margin: '2px 0 0 0',
-                fontSize: '0.75rem',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              Existing Venue Accessibility, Sightline (15×9 Grid) &amp; Comfort
-              Review · Not an ADA Certification
-            </p>
-          </div>
-        </div>
-
-        {/* Action Buttons & Live Timer */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            flexWrap: 'wrap',
-          }}
-        >
-          {onSelectVenuePreset && (
-            <div
-              style={{
-                display: 'inline-flex',
-                gap: '4px',
-                padding: '3px',
-                borderRadius: 'var(--radius-inner)',
-                background: 'var(--bg-surface-elevated)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <button
-                type="button"
-                className={`vp-btn ${venuePreset === 'prepared_24' ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
-                disabled={isRunning || isCapturingClip}
-                onClick={() => onSelectVenuePreset('prepared_24')}
-              >
-                24-Place Village Hall
-              </button>
-              <button
-                type="button"
-                className={`vp-btn ${venuePreset === 'classroom_50' ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
-                disabled={isRunning || isCapturingClip}
-                onClick={() => onSelectVenuePreset('classroom_50')}
-                title="Load the 50-Seat University Lecture Classroom (smallClassroom.blend / smallClassroom.glb) with 5 curved oak tiers, 2 exits, and natural obstructions"
-              >
-                50-Seat Classroom (.glb)
-              </button>
-              <button
-                type="button"
-                className={`vp-btn ${venuePreset === 'custom_glb' ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
-                disabled={isRunning || isCapturingClip}
-                onClick={() => onSelectVenuePreset('custom_glb')}
-                title="Parse and auto-label seats, wheelchair bays, exits, stage, and props from a 16-place Civic Auditorium .glb model"
-              >
-                16-Place Civic Auditorium (.glb)
-              </button>
-              <button
-                type="button"
-                className={`vp-btn ${venuePreset === 'dev_4' ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '4px 9px', fontSize: '0.73rem' }}
-                disabled={isRunning || isCapturingClip}
-                onClick={() => onSelectVenuePreset('dev_4')}
-              >
-                4-Place Compact Hall
-              </button>
-              {onUploadGlbFile && (
-                <label
-                  className="vp-btn"
-                  style={{
-                    padding: '4px 9px',
-                    fontSize: '0.73rem',
-                    cursor:
-                      isRunning || isCapturingClip || isParsingGlb
-                        ? 'wait'
-                        : 'pointer',
-                    borderColor: 'rgba(167, 139, 250, 0.55)',
-                    color: '#c4b5fd',
-                    background: isParsingGlb
-                      ? 'rgba(139, 92, 246, 0.24)'
-                      : undefined,
-                  }}
-                  title="Upload any binary glTF 2.0 (.glb) 3D building to auto-parse and label seats, wheelchair bays, exits, stage, and props"
-                >
-                  {isParsingGlb
-                    ? `Parsing .glb (${glbParseProgress?.percent ?? 0}%)…`
-                    : 'Upload .glb Building'}
-                  <input
-                    type="file"
-                    accept=".glb"
-                    disabled={isRunning || isCapturingClip || isParsingGlb}
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        onUploadGlbFile(file);
-                      }
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              )}
-            </div>
-          )}
-
-          {activeRun && (
-            <div
-              className="vp-card-inner"
-              style={{
-                padding: '6px 10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '0.76rem',
-              }}
-            >
-              {isRunning && <span className="vp-live-dot" />}
-              <span className="mono">
-                Elapsed: {(activeRun.elapsedMs / 1000).toFixed(1)}s
-              </span>
-              <span style={{ color: 'var(--text-muted)' }}>|</span>
+        ) : isRunning || isCapturingClip ? (
+          <div
+            className="vp-badge vp-badge-neutral"
+            style={{
+              padding: '4px 12px',
+              fontSize: '0.75rem',
+              background: 'var(--bg-elevated)',
+              borderColor: 'var(--border-accent)',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <span className="vp-live-dot" />
+            <span>
+              Step {Math.max(1, currentIdx + 1)}/{ORDERED_STATES.length} ·{' '}
+              {currentStep?.label ?? 'Inspecting'}
+              {activePovLabel ? ` (${activePovLabel})` : ''}
+            </span>
+            {activeRun && (
               <span
                 className="mono"
                 style={{
                   color:
-                    remainingSec < 20 ? '#f87171' : 'var(--text-secondary)',
+                    remainingSec < 20
+                      ? 'var(--status-fail-text)'
+                      : 'var(--text-secondary)',
+                  marginLeft: '4px',
                 }}
               >
-                Budget: {remainingSec}s / 110s
-              </span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            className="vp-btn vp-btn-primary"
-            disabled={isRunning || isCapturingClip}
-            onClick={onStartLiveRun}
-          >
-            {isRunning
-              ? 'Live Run in Progress…'
-              : 'Review and Improve (Live API)'}
-          </button>
-
-          <button
-            type="button"
-            className="vp-btn"
-            disabled={isRunning || isCapturingClip}
-            onClick={onPreviewLocalRepair}
-            title="Test Before/After comparison using the deterministic reference repair patch"
-          >
-            Preview Repair
-          </button>
-
-          {activeRun && (
-            <button
-              type="button"
-              className="vp-btn"
-              onClick={onResetToBaseline}
-            >
-              Reset to Baseline
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Live GLB Upload & Auto-Labeling Progress Tracker */}
-      {glbParseProgress && glbParseProgress.stage !== 'complete' && (
-        <div
-          data-testid="glb-parse-progress"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-inner)',
-            background: 'rgba(76, 29, 149, 0.28)',
-            border: '1px solid rgba(167, 139, 250, 0.5)',
-            fontSize: '0.75rem',
-            color: '#f5f3ff',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="vp-live-dot" />
-              <strong>{glbParseProgress.label}</strong>
-              <span style={{ color: '#c4b5fd' }}>
-                — {glbParseProgress.detail}
-              </span>
-            </div>
-            <span className="mono" style={{ fontWeight: 700, color: '#ddd6fe' }}>
-              {glbParseProgress.percent}%
-            </span>
-          </div>
-          <div
-            style={{
-              width: '100%',
-              height: '6px',
-              borderRadius: '999px',
-              background: 'rgba(15, 23, 42, 0.7)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                background: 'linear-gradient(90deg, #8b5cf6 0%, #38bdf8 100%)',
-                transformOrigin: 'left center',
-                transform: `scaleX(${Math.max(0.04, Math.min(1, glbParseProgress.percent / 100))})`,
-                transition: 'transform 140ms cubic-bezier(0.16, 1, 0.3, 1)',
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* GLB Auto-Labeler Summary Strip (shown when viewing an auto-parsed .glb venue) */}
-      {glbParseReport &&
-        (venuePreset === 'custom_glb' || venuePreset === 'classroom_50') && (
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '10px',
-            padding: '6px 12px',
-            borderRadius: 'var(--radius-inner)',
-            background: 'rgba(139, 92, 246, 0.14)',
-            border: '1px solid rgba(167, 139, 250, 0.35)',
-            fontSize: '0.74rem',
-            color: '#e9d5ff',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <strong>Parallel Gemini GLB Agents:</strong>{' '}
-            <code>{glbParseReport.fileName}</code> ({glbParseReport.totalNodes}{' '}
-            3D nodes)
-            {glbParseReport.agentTelemetry && (
-              <span
-                className="mono"
-                style={{
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  background: 'rgba(56, 189, 248, 0.18)',
-                  color: '#7dd3fc',
-                  fontSize: '0.69rem',
-                }}
-                title={glbParseReport.agentTelemetry.agents
-                  .map((a) => `${a.agentName} (${a.latencyMs}ms): ${a.summary}`)
-                  .join(' | ')}
-              >
-                ⚡ 3 Parallel Agents ({glbParseReport.agentTelemetry.totalParallelLatencyMs}ms):{' '}
-                {glbParseReport.agentTelemetry.agents
-                  .map((a) => a.agentName.replace('AndAccessibilityAgent', '').replace('AndScreenAgent', ''))
-                  .join(' + ')}
+                {(activeRun.elapsedMs / 1000).toFixed(1)}s
               </span>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+        ) : activeRun?.state === 'finished' ? (
+          <div
+            className={`vp-badge ${
+              activeRun.outcome === 'improved'
+                ? 'vp-badge-pass'
+                : 'vp-badge-neutral'
+            }`}
+            style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+          >
+            <span
+              className={`vp-status-dot ${
+                activeRun.outcome === 'improved'
+                  ? 'vp-status-dot-pass'
+                  : 'vp-status-dot-warn'
+              }`}
+            />
             <span>
-              Parsed Seats: <strong>{glbParseReport.counts.seats}</strong>
-            </span>
-            <span>
-              Wheelchair Bays:{' '}
-              <strong>{glbParseReport.counts.wheelchairBays}</strong>
-            </span>
-            <span>
-              Spawned People:{' '}
-              <strong>{glbParseReport.snapshot.roster.length}</strong>
-            </span>
-            <span>
-              Synthesized Corridors:{' '}
-              <strong>{glbParseReport.snapshot.routes.length}</strong>
-            </span>
-            <span>
-              Stage/Screen:{' '}
-              <strong>{glbParseReport.counts.stagesAndScreens}</strong>
+              {activeRun.runId === 'preview_dev_fixture'
+                ? 'Reference Repair Applied · All Seats Verified Clear'
+                : `Audit Complete · ${
+                    activeRun.outcome === 'improved'
+                      ? 'Layout Improved'
+                      : activeRun.outcome === 'no_improvement'
+                        ? 'Baseline Retained'
+                        : activeRun.outcome.replace(/_/g, ' ')
+                  }`}
             </span>
           </div>
-        </div>
-      )}
-
-      {/* 8-State Pipeline Bar */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(8, minmax(0, 1fr))',
-          gap: '6px',
-        }}
-      >
-        {ORDERED_STATES.map((step, idx) => {
-          const isCurrent = activeRun?.state === step.state;
-          const isCompleted =
-            currentIdx > idx || activeRun?.state === 'finished';
-
-          return (
-            <div
-              key={step.state}
-              style={{
-                padding: '5px 8px',
-                borderRadius: 'var(--radius-inner)',
-                fontSize: '0.71rem',
-                fontWeight: isCurrent ? 700 : 500,
-                textAlign: 'center',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                border: isCurrent
-                  ? '1px solid var(--border-accent)'
-                  : '1px solid var(--border-subtle)',
-                background: isCurrent
-                  ? 'var(--bg-surface-active)'
-                  : isCompleted
-                    ? 'rgba(16, 185, 129, 0.12)'
-                    : 'var(--bg-surface-elevated)',
-                color: isCurrent
-                  ? '#93c5fd'
-                  : isCompleted
-                    ? '#34d399'
-                    : 'var(--text-muted)',
-              }}
-            >
-              {step.label}
-            </div>
-          );
-        })}
+        ) : glbParseReport &&
+          (venuePreset === 'custom_glb' || venuePreset === 'classroom_50') ? (
+          <div
+            className="vp-badge vp-badge-neutral"
+            style={{
+              padding: '4px 12px',
+              fontSize: '0.73rem',
+              background: 'rgba(56, 189, 248, 0.12)',
+              borderColor: 'rgba(56, 189, 248, 0.35)',
+              color: '#bae6fd',
+            }}
+            title={
+              glbParseReport.agentTelemetry?.agents
+                .map((a) => `${a.agentName} (${a.latencyMs}ms): ${a.summary}`)
+                .join(' | ') ?? undefined
+            }
+          >
+            <span>
+              ⚡ 3 Parallel GLB Agents ({glbParseReport.counts.seats} 3D chairs ·
+              Target: {glbParseReport.snapshot.target.id} ·{' '}
+              {glbParseReport.snapshot.roster.length} spawned)
+            </span>
+          </div>
+        ) : (
+          <div
+            className={`vp-badge ${
+              unmetCount === 0 ? 'vp-badge-pass' : 'vp-badge-warn'
+            }`}
+            style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+          >
+            <span
+              className={`vp-status-dot ${
+                unmetCount === 0 ? 'vp-status-dot-pass' : 'vp-status-dot-warn'
+              }`}
+            />
+            <span>
+              {unmetCount === 0
+                ? `All ${totalSeats} seats clear & accessible`
+                : `${unmetCount} of ${totalSeats} seats have sightline or access issues`}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Status / Error Callouts */}
-      {(captureStatusText || errorText) && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            fontSize: '0.76rem',
-            padding: '6px 10px',
-            borderRadius: 'var(--radius-inner)',
-            background: errorText
-              ? 'var(--color-danger-bg)'
-              : 'rgba(59, 130, 246, 0.12)',
-            border: errorText
-              ? '1px solid rgba(239, 68, 68, 0.3)'
-              : '1px solid rgba(59, 130, 246, 0.3)',
-            color: errorText ? '#fca5a5' : '#93c5fd',
-          }}
+      {/* Right: Primary & Secondary Actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {activeRun && (
+          <button
+            type="button"
+            className="vp-btn vp-btn-ghost"
+            onClick={onResetToBaseline}
+          >
+            Reset Baseline
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="vp-btn"
+          disabled={isRunning || isCapturingClip}
+          onClick={onPreviewLocalRepair}
+          title="Instantly apply verified layout repair for live comparison"
         >
-          <span>{errorText ?? captureStatusText}</span>
-          {activeRun?.runId && (
-            <span className="mono" style={{ fontSize: '0.72rem' }}>
-              runId: {activeRun.runId}
-            </span>
-          )}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <span>Instant Repair</span>
+        </button>
+
+        <button
+          type="button"
+          className="vp-btn vp-btn-primary"
+          disabled={isRunning || isCapturingClip}
+          onClick={onStartLiveRun}
+          title={
+            captureStatusText ?? 'Run live Argon visual audit & spatial repair'
+          }
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3v3m0 12v3M3 12h3m12 0h3m-2.6-6.4-2.1 2.1M8.7 15.3l-2.1 2.1m0-12.8 2.1 2.1m6.6 6.6 2.1 2.1" />
+          </svg>
+          <span>{isRunning ? 'Auditing Venue…' : 'Run Live Audit'}</span>
+        </button>
+      </div>
+
+      {/* Sleek Bottom Edge Progress Track during Active Run or GLB Parsing */}
+      {(isRunning || isCapturingClip || isParsingGlb) && (
+        <div className="vp-header-progress-track" aria-hidden="true">
+          <div
+            className="vp-header-progress-fill"
+            style={{
+              width: '100%',
+              transform: `scaleX(${Math.max(
+                0.08,
+                isParsingGlb && glbParseProgress
+                  ? glbParseProgress.percent / 100
+                  : progressFraction,
+              )})`,
+            }}
+          />
         </div>
       )}
     </header>

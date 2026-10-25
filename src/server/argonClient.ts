@@ -393,9 +393,13 @@ function parseOperations(rawOperations: unknown): PatchOperation[] {
 
 export function buildCall1Prompt(blindPayload: BlindCritiquePayload): string {
   return [
-    'You are Argon, the visual accessibility and sightline reviewer for VenuePilot (PRD v2.1).',
-    'Inspect the attached baseline venue tour video clip and the structured scene context below.',
-    'Do NOT invent hidden structural changes. Diagnose sightline obstructions, route/clearance issues, and seating comfort issues directly from the video and scene geometry.',
+    'You are Argon, the visual accessibility, sightline, and emergency evacuation reviewer for VenuePilot (PRD v2.1).',
+    'Inspect the attached baseline venue tour video clip (which includes an overhead seating & emergency evacuation flow view followed by attendee POVs) and the structured scene context below.',
+    'Do NOT invent hidden structural changes. Diagnose sightline obstructions, route/clearance issues, seating comfort issues, AND emergency evacuation bottlenecks directly from the video and scene geometry.',
+    '',
+    'EMERGENCY EVACUATION & EGRESS GUIDANCE:',
+    '- Check if seat rows or chairGroups are tightly bunched along Z (narrow inter-row clear gap < 0.45m slows down emergency row extrication and traps interior attendees). If rows or seats are bunched together, propose bounded translations on chairGroups or movable_chair objects to space the rows/seats out.',
+    '- Check if any venue exit portal (listed in exits or route endpoints, such as exit_emergency_east) or aisle merge is blocked or narrowed by a movable barrier, cart, or prop (e.g., gateObjectId or movable_prop near the exit). If an emergency exit door or corridor is obstructed, move the blocking object clear so evacuees can escape through multiple exits without traffic jams.',
     '',
     'STRICT PATCH CONSTRAINTS:',
     `- Maximum ${PATCH_CONSTRAINTS.maxOperations} operations on non-overlapping targets (never target both a chairGroup and one of its memberObjectIds).`,
@@ -421,6 +425,7 @@ export function buildCall2Prompt(input: InspectRevisionInput): string {
       sceneHash: input.baselineEvaluation.sceneHash,
       allModeledRequirementsMet: input.baselineEvaluation.allModeledRequirementsMet,
       comparison: input.baselineEvaluation.comparison,
+      evacuation: input.baselineEvaluation.evacuation,
       perProfile: input.baselineEvaluation.perProfile,
       attendees: input.baselineEvaluation.attendees,
     },
@@ -428,6 +433,7 @@ export function buildCall2Prompt(input: InspectRevisionInput): string {
       sceneHash: input.revisedEvaluation.sceneHash,
       allModeledRequirementsMet: input.revisedEvaluation.allModeledRequirementsMet,
       comparison: input.revisedEvaluation.comparison,
+      evacuation: input.revisedEvaluation.evacuation,
       perProfile: input.revisedEvaluation.perProfile,
       attendees: input.revisedEvaluation.attendees,
     },
@@ -435,8 +441,8 @@ export function buildCall2Prompt(input: InspectRevisionInput): string {
 
   return [
     'You are Argon performing the final visual reinspection for VenuePilot (PRD v2.1 §7).',
-    'Inspect the attached revised venue tour video clip alongside the verified before/after evaluation metrics below.',
-    'Provide evidence-linked findings tied to viewIds and timestamps in revisedEvidenceManifest.keyframes, and summarize verified improvements and any remaining issues.',
+    'Inspect the attached revised venue tour video clip alongside the verified before/after evaluation and emergency evacuation metrics below.',
+    'Provide evidence-linked findings tied to viewIds and timestamps in revisedEvidenceManifest.keyframes, and summarize verified improvements in sightlines, accessibility, and emergency evacuation flow (such as reduced totalEvacuationTimeSec, spaced-out rows, and cleared emergency exits) as well as any remaining issues.',
     '',
     'REVISED SCENE & VERIFIED EVALUATION CONTEXT (JSON):',
     JSON.stringify(verificationContext),

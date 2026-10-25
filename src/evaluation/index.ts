@@ -18,6 +18,7 @@ import {
   type SceneSnapshot,
 } from '../shared/index.js';
 import { buildSceneAccessContext, evaluateAttendeeAccess } from './access.js';
+import { simulateEvacuation } from './evacuation.js';
 import { applyAndValidatePatch, compareEvaluations } from './patch.js';
 import { validateSceneStructure } from './structural.js';
 import { evaluateAttendeeVisibility } from './visibility.js';
@@ -26,6 +27,7 @@ export * from './geometry.js';
 export * from './structural.js';
 export * from './visibility.js';
 export * from './access.js';
+export * from './evacuation.js';
 export { applyAndValidatePatch, compareEvaluations };
 
 /**
@@ -52,6 +54,10 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
   const accessContext = !hasMalformedGeometry
     ? buildSceneAccessContext(snapshot)
     : undefined;
+  const evacResult = !hasMalformedGeometry
+    ? simulateEvacuation(snapshot, 'emergency_evacuation')
+    : undefined;
+  const jammedSet = new Set(evacResult?.jammedAttendeeIds ?? []);
 
   for (const member of snapshot.roster) {
     const profile = snapshot.profiles[member.profileId];
@@ -104,12 +110,18 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
       accessContext,
     );
 
+    const evacTimeSec = evacResult?.attendeeTimesSec[member.attendeeId];
+    const isEvacDelayed = jammedSet.has(member.attendeeId);
+
     const failedRequirements = [...acc.failedAccessRequirements];
     if (!vis.isViewClear) {
       failedRequirements.push('clear_view');
     }
+    if (isEvacDelayed) {
+      failedRequirements.push('emergency_egress_congestion');
+    }
 
-    const usable = acc.usable;
+    const usable = acc.usable && !isEvacDelayed;
     const clearAndUsable = usable && vis.isViewClear;
 
     attendees[member.attendeeId] = {
@@ -131,6 +143,8 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
       failedRequirements,
       optionalPreferenceNotes: acc.optionalPreferenceNotes,
       primaryBlockerIds: vis.primaryBlockerIds,
+      ...(evacTimeSec !== undefined ? { evacuationTimeSec: evacTimeSec } : {}),
+      ...(evacTimeSec !== undefined ? { evacuationDelayed: isEvacDelayed } : {}),
     };
   }
 
@@ -189,6 +203,22 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
     };
   }
 
+  const evacuationSummary = evacResult
+    ? {
+        mode: evacResult.mode,
+        durationSec: evacResult.durationSec,
+        totalEvacuationTimeSec: evacResult.totalEvacuationTimeSec,
+        targetThresholdSec: evacResult.targetThresholdSec,
+        evacuationPass: evacResult.evacuationPass,
+        activeExitCount: evacResult.activeExitCount,
+        totalExitCount: evacResult.totalExitCount,
+        peakCongestionDensity: evacResult.peakCongestionDensity,
+        jammedAttendeeIds: evacResult.jammedAttendeeIds,
+        bottleneckZones: evacResult.bottleneckZones,
+        attendeeTimesSec: evacResult.attendeeTimesSec,
+      }
+    : undefined;
+
   return {
     contractVersion: CONTRACT_VERSION,
     sceneHash: snapshot.sceneHash,
@@ -208,5 +238,6 @@ export function evaluateScene(snapshot: SceneSnapshot): Evaluation {
       worstProfileMeanVisibility,
       totalVisibleSamples,
     },
+    ...(evacuationSummary ? { evacuation: evacuationSummary } : {}),
   };
 }

@@ -155,6 +155,62 @@ export interface RouteCorridor {
   widthM: number;
 }
 
+export type EvacuationMode =
+  | 'none'
+  | 'normal_egress'
+  | 'emergency_evacuation';
+
+export interface VenueExitPortal {
+  id: string;
+  label: string;
+  /** Floor-plane center [x, z] in metres */
+  position: Vec2;
+  /** Clear portal door width in metres */
+  widthM: number;
+  /** Outward facing yaw in degrees */
+  yawDeg: number;
+  /** True for secondary emergency exit portals */
+  isEmergencyExit?: boolean;
+  /** Optional SceneObject ID (e.g. movable barrier or closed emergency door panel) that can obstruct this exit until moved */
+  gateObjectId?: string;
+}
+
+export interface EvacuationAgentFrameState {
+  position: Vec2;
+  yawDeg: number;
+  speedMps: number;
+  state: 'seated' | 'extricating' | 'walking' | 'queuing' | 'exited';
+  targetExitId: string;
+}
+
+export interface EvacuationBottleneckZone {
+  center: Vec2;
+  radiusM: number;
+  peakQueueCount: number;
+  causeObjectIds: string[];
+  description: string;
+}
+
+export interface EvacuationSimResult {
+  mode: 'normal_egress' | 'emergency_evacuation';
+  durationSec: number;
+  totalEvacuationTimeSec: number;
+  targetThresholdSec: number;
+  evacuationPass: boolean;
+  activeExitCount: number;
+  totalExitCount: number;
+  peakCongestionDensity: number;
+  jammedAttendeeIds: string[];
+  bottleneckZones: EvacuationBottleneckZone[];
+  attendeeTimesSec: Record<string, number>;
+  frames: Array<{
+    timeSec: number;
+    agents: Record<string, EvacuationAgentFrameState>;
+  }>;
+}
+
+export type EvacuationEvaluationSummary = Omit<EvacuationSimResult, 'frames'>;
+
 export interface SceneSourceMetadata {
   sourceId: string;
   title: string;
@@ -182,6 +238,8 @@ export interface SceneSnapshot {
   chairGroups: ChairGroup[];
   places: AudiencePlace[];
   routes: RouteCorridor[];
+  /** Optional explicit exit portals; when omitted, derived deterministically from routes & room bounds */
+  exits?: VenueExitPortal[];
   profiles: Record<ProfileId, ProfileRequirements>;
   roster: AttendeeAssignment[];
 }
@@ -259,6 +317,10 @@ export interface AttendeeEvaluation {
   optionalPreferenceNotes: string[];
   /** Internal blocker IDs; MUST be stripped before the first Argon visual critique call */
   primaryBlockerIds: string[];
+  /** Emergency evacuation exit time in seconds for this attendee */
+  evacuationTimeSec?: number;
+  /** True if emergency evacuation from this seat is delayed by row bunching or exit bottlenecks */
+  evacuationDelayed?: boolean;
 }
 
 export interface ProfileSummaryMetrics {
@@ -295,6 +357,8 @@ export interface Evaluation {
   attendees: Record<string, AttendeeEvaluation>;
   perProfile: Record<ProfileId, ProfileSummaryMetrics>;
   comparison: ComparisonComponents;
+  /** Deterministic emergency evacuation simulation metrics */
+  evacuation?: EvacuationEvaluationSummary;
 }
 
 /**
@@ -491,6 +555,7 @@ export interface BlindCritiquePayload {
   chairGroups: ChairGroup[];
   places: AudiencePlace[];
   routes: RouteCorridor[];
+  exits?: VenueExitPortal[];
   target: PresentationTarget;
   patchConstraints: {
     readonly maxOperations: number;

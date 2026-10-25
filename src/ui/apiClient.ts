@@ -17,6 +17,7 @@ import {
 } from '../evaluation/index.js';
 import {
   PREPARED_VENUE_SCENE_ID,
+  createBunchedEmergencyReferencePatch,
   createPreparedVenueReferencePatch,
 } from '../scene/index.js';
 import { evaluateSceneWithFallback } from './localEvaluatorFallback.js';
@@ -134,12 +135,20 @@ export function createLocalFixtureRepairPreviewRun(
 
   if (
     baselineSnapshot.sceneId === PREPARED_VENUE_SCENE_ID ||
+    baselineSnapshot.sceneId === 'scene_community_hall_24_bunched' ||
     hasPreparedProps
   ) {
-    const patch = createPreparedVenueReferencePatch(
-      'preview_dev_fixture',
-      baselineSnapshot.sceneHash,
-    );
+    const isBunched =
+      baselineSnapshot.sceneId === 'scene_community_hall_24_bunched';
+    const patch = isBunched
+      ? createBunchedEmergencyReferencePatch(
+          'preview_dev_fixture',
+          baselineSnapshot.sceneHash,
+        )
+      : createPreparedVenueReferencePatch(
+          'preview_dev_fixture',
+          baselineSnapshot.sceneHash,
+        );
     const validated = applyAndValidatePatch(
       baselineSnapshot,
       baselineSnapshot,
@@ -179,30 +188,54 @@ export function createLocalFixtureRepairPreviewRun(
       finalInspection: {
         captureId: `cap_preview_revision_${placeCount}`,
         sceneHash: bestSnapshot.sceneHash,
-        findings: [
-          {
-            attendeeId: 'att_shorter_01',
-            viewId: 'view_pov_att_shorter_01',
-            timestampSec: 3.5,
-            observation:
-              'Shifting obj_prop_welcome_sign 0.55m west cleared the central screen sightline for Row 1 Center (135/135 visible samples).',
-          },
-          {
-            attendeeId: 'att_extra_legroom_01',
-            viewId: 'view_pov_att_extra_legroom_01',
-            timestampSec: 6.0,
-            observation:
-              'Shifting obj_prop_catering_table 0.55m toward the stage restored full >= 0.55m front legroom for Row 1 East seats.',
-          },
-          {
-            attendeeId: 'att_wheelchair_01',
-            viewId: 'view_pov_att_wheelchair_01',
-            timestampSec: 8.5,
-            observation:
-              'Shifting obj_prop_av_cart 0.60m east cleared Wheelchair Bay W2 turning circle (1.55m diameter unobstructed).',
-          },
-        ],
-        remainingIssuesSummary: `All ${placeCount} audience places now satisfy sightline, route, footprint, front-legroom, and wheelchair turning-space requirements (0 failed checks).`,
+        findings: isBunched
+          ? [
+              {
+                attendeeId: 'att_adult_01',
+                viewId: 'view_overview_room',
+                timestampSec: 1.4,
+                observation:
+                  'Spaced Row 2 chair groups (group_r2_west, group_r2_center, group_r2_east) back by +0.55m, eliminating emergency extrication jamming.',
+              },
+              {
+                attendeeId: 'att_wheelchair_01',
+                viewId: 'view_overview_room',
+                timestampSec: 1.8,
+                observation:
+                  'Moved obj_prop_exit_barrier clear of the East Secondary Emergency Exit, opening both exit portals and cutting total emergency evacuation time.',
+              },
+              {
+                attendeeId: 'att_shorter_01',
+                viewId: 'view_pov_att_shorter_01',
+                timestampSec: 3.5,
+                observation:
+                  'Shifting obj_prop_welcome_sign 0.55m west cleared the central screen sightline for Row 1 Center (135/135 visible samples).',
+              },
+            ]
+          : [
+              {
+                attendeeId: 'att_shorter_01',
+                viewId: 'view_pov_att_shorter_01',
+                timestampSec: 3.5,
+                observation:
+                  'Shifting obj_prop_welcome_sign 0.55m west cleared the central screen sightline for Row 1 Center (135/135 visible samples).',
+              },
+              {
+                attendeeId: 'att_extra_legroom_01',
+                viewId: 'view_pov_att_extra_legroom_01',
+                timestampSec: 6.0,
+                observation:
+                  'Shifting obj_prop_catering_table 0.55m toward the stage restored full >= 0.55m front legroom for Row 1 East seats.',
+              },
+              {
+                attendeeId: 'att_wheelchair_01',
+                viewId: 'view_pov_att_wheelchair_01',
+                timestampSec: 8.5,
+                observation:
+                  'Shifting obj_prop_av_cart 0.60m east cleared Wheelchair Bay W2 turning circle (1.55m diameter unobstructed).',
+              },
+            ],
+        remainingIssuesSummary: `All ${placeCount} audience places now satisfy sightline, route, footprint, front-legroom, wheelchair turning-space, and emergency evacuation requirements.`,
       },
       providerModel: 'local-reference-preview (no paid model call)',
       providerRequestIds: [],

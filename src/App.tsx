@@ -11,6 +11,7 @@ import {
   type SceneSnapshot,
 } from './shared/index.js';
 import {
+  createBunchedEmergencyVenueSnapshot,
   createPreparedVenueSnapshot,
   generateSampleCustomAuditoriumGlb,
   parseAndLabelGlbVenueAsync,
@@ -142,7 +143,7 @@ export function App(): React.ReactElement {
       setIsCapturingClip(true);
       setErrorText(null);
       setCaptureStatusText(
-        `Recording ${pending.phase} inspection video (${pending.captureId}) on dedicated 512×512 canvas…`,
+        `Recording ${pending.phase} optical tour…`,
       );
 
       // Step the visible 3D viewport through the tour keyframes in real time while recording
@@ -168,7 +169,7 @@ export function App(): React.ReactElement {
         if (cancelled) return;
 
         setCaptureStatusText(
-          `Uploading ${pending.phase} video (${(videoBlob.size / 1024).toFixed(1)} KB, ${manifest.mimeType}) to POST /api/runs/${activeRun.runId}/evidence…`,
+          `Uploading ${pending.phase} video (${(videoBlob.size / 1024).toFixed(1)} KB)…`,
         );
 
         await uploadRunEvidence(activeRun.runId, videoBlob, manifest);
@@ -184,7 +185,7 @@ export function App(): React.ReactElement {
           setViewingStage('best');
         }
         setCaptureStatusText(
-          `Uploaded ${pending.phase} evidence (${manifest.captureId}). Waiting for Argon controller (${refreshed.run.state})…`,
+          `Uploaded ${pending.phase} evidence. Waiting for Argon controller…`,
         );
       } catch (err) {
         if (cancelled) return;
@@ -279,7 +280,7 @@ export function App(): React.ReactElement {
 
   const handleStartLiveRun = async (): Promise<void> => {
     setErrorText(null);
-    setCaptureStatusText('Starting live run via POST /api/runs…');
+    setCaptureStatusText('Starting live Argon audit…');
     try {
       const created = await postCreateRun(baselineSnapshot);
       const statusRes = await getRunStatus(created.runId);
@@ -365,7 +366,9 @@ export function App(): React.ReactElement {
     const nextSnap =
       preset === 'prepared_24'
         ? createPreparedVenueSnapshot()
-        : createDevFixtureSnapshot();
+        : preset === 'bunched_emergency_24'
+          ? createBunchedEmergencyVenueSnapshot()
+          : createDevFixtureSnapshot();
     setGlbParseProgress(null);
     setVenuePreset(preset);
     setBaselineSnapshot(nextSnap);
@@ -531,7 +534,7 @@ export function App(): React.ReactElement {
     setCaptureStatusText(
       venuePreset === 'dev_4'
         ? 'Showing 4-Place Compact Hall Repair Preview (obj_prop_sign_01 shifted; Sam R2-1 visibility 54/135 → 135/135).'
-        : `Showing ${baselineSnapshot.places.length}-Place Reference Repair Preview (welcome sign, literature table, and AV cart relocated; all ${baselineSnapshot.places.length} places pass).`,
+        : `Showing ${baselineSnapshot.places.length}-Place Reference Repair Preview (all ${baselineSnapshot.places.length} places pass).`,
     );
   };
 
@@ -561,6 +564,8 @@ export function App(): React.ReactElement {
         venuePreset={venuePreset}
         glbParseReport={glbParseReport}
         glbParseProgress={glbParseProgress}
+        unmetCount={displayedEvaluation.comparison.attendeesWithUnmetRequirements}
+        totalSeats={displayedEvaluation.occupiedCount}
         onSelectVenuePreset={handleSelectVenuePreset}
         onUploadGlbFile={(file) => void handleUploadGlbFile(file)}
         onStartLiveRun={() => void handleStartLiveRun()}

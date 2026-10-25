@@ -38,7 +38,9 @@ import {
   applyActiveViewerVisibility,
   buildVenueThreeScene,
   disposeVenueScene,
+  updateSceneEvacuationStep,
 } from './sceneBuilder.js';
+import { simulateEvacuation } from '../evaluation/evacuation.js';
 import { createDeterministicWebmBytes } from './webmCodec.js';
 
 const PREFERRED_MIME_TYPES = [
@@ -334,6 +336,7 @@ async function recordBrowserCanvasClip(params: {
     );
 
     const targetCanvas = ctx2d ? recordingCanvas : webglCanvas;
+    const evacSim = simulateEvacuation(snapshot, 'emergency_evacuation');
 
     const renderKeyframeAt = (elapsedSec: number) => {
       const activeKf =
@@ -341,6 +344,36 @@ async function recordBrowserCanvasClip(params: {
 
       if (builtScene && renderer) {
         if (activeKf) {
+          if (activeKf.kind === 'overview') {
+            const kfDuration = Math.max(0.1, activeKf.endSec - activeKf.startSec);
+            const kfProgress = Math.max(
+              0,
+              Math.min(1, (elapsedSec - activeKf.startSec) / kfDuration),
+            );
+            // First 35% of overview shows static seated room; remaining 65% animates emergency evacuation flow
+            if (kfProgress > 0.35) {
+              const evacProgress = (kfProgress - 0.35) / 0.65;
+              updateSceneEvacuationStep(
+                builtScene.attendeeProxyNodesById,
+                evacSim,
+                evacProgress * Math.min(10.0, evacSim.durationSec),
+              );
+            } else {
+              updateSceneEvacuationStep(
+                builtScene.attendeeProxyNodesById,
+                null,
+                0,
+              );
+            }
+          } else {
+            // Reset avatars to seated positions for exact attendee POV sightline inspection
+            updateSceneEvacuationStep(
+              builtScene.attendeeProxyNodesById,
+              null,
+              0,
+            );
+          }
+
           applyActiveViewerVisibility(
             builtScene.scene,
             snapshot,

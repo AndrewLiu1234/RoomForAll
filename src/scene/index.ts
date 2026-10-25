@@ -24,6 +24,8 @@ export {
   PREPARED_VENUE_GLB_PATH,
   PREPARED_VENUE_MANIFEST_PATH,
   PREPARED_VENUE_SCENE_ID,
+  createBunchedEmergencyReferencePatch,
+  createBunchedEmergencyVenueSnapshot,
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
   generateVenueGlbBinary,
@@ -68,8 +70,15 @@ export {
   buildVenueThreeScene,
   disposeVenueScene,
   getProxyWorldTransform,
+  updateSceneEvacuationStep,
   type BuildVenueSceneOptions,
   type BuiltVenueScene,
 } from './sceneBuilder.js';
+
+export {
+  buildVenueExitPortalNodes,
+  createArticulatedAvatarMesh,
+  updateAvatarAnimationPose,
+} from './avatarBuilder.js';
 
 export { createDeterministicWebmBytes } from './webmCodec.js';

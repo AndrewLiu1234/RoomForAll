@@ -18,6 +18,7 @@ import {
   getTargetSamplePointsWorld,
   yawDegToForwardVector,
   yawDegToRightVector,
+  type EvacuationSimResult,
   type ProfileId,
   type ProxyPrimitive,
   type SceneObject,
@@ -28,6 +29,11 @@ import {
   getUploadedGlbGroupForScene,
   isStandaloneUploadedGlbScene,
 } from './glbAutoLabeler.js';
+import {
+  buildVenueExitPortalNodes,
+  createArticulatedAvatarMesh,
+  updateAvatarAnimationPose,
+} from './avatarBuilder.js';
 
 export interface BuildVenueSceneOptions {
   /**
@@ -423,7 +429,10 @@ export function buildVenueThreeScene(
     objectNodesById.set(obj.id, objGroup);
   }
 
-  // 5. Finite-Height Seated Attendee Torso/Head Proxies (PRD §4, §6: other occupied places are occluders)
+  // 4b. Architectural Exit Door Portals & Illuminated EXIT Signs
+  scene.add(buildVenueExitPortalNodes(snapshot));
+
+  // 5. Finite-Height Seated Attendee Articulated Avatars (PRD §4, §6: other occupied places are occluders)
   for (const member of snapshot.roster) {
     const torsoBox = getAttendeeTorsoProxyWorldBox(snapshot, member.attendeeId);
     const proxyGroup = new THREE.Group();
@@ -435,32 +444,17 @@ export function buildVenueThreeScene(
       profileId: member.profileId,
     };
 
-    const torsoGeo = new THREE.BoxGeometry(
-      torsoBox.size[0],
-      torsoBox.size[1],
-      torsoBox.size[2],
-    );
-    const baseColor =
-       clean
-        ? 0x64748b
-        : (PROFILE_TORSO_COLORS[member.profileId] ?? 0x64748b);
-    const torsoMat = new THREE.MeshStandardMaterial({
-      color: baseColor,
-      roughness: 0.75,
-      metalness: 0.05,
-    });
-    const torsoMesh = new THREE.Mesh(torsoGeo, torsoMat);
-    torsoMesh.position.set(
-      torsoBox.centerWorld[0],
-      torsoBox.centerWorld[1],
-      torsoBox.centerWorld[2],
-    );
-    torsoMesh.rotation.y = torsoBox.yawDeg * DEG_TO_RAD;
-    torsoMesh.userData = {
-      ownerAttendeeId: member.attendeeId,
-      ownerObjectId: torsoBox.ownerObjectId,
+    const baseColor = clean
+      ? 0x64748b
+      : (PROFILE_TORSO_COLORS[member.profileId] ?? 0x64748b);
+    const { rootMesh: torsoMesh } = createArticulatedAvatarMesh({
+      attendeeId: member.attendeeId,
+      profileId: member.profileId,
       placeId: member.assignedPlaceId,
-    };
+      torsoBox,
+      baseColorHex: baseColor,
+      cleanForEvidenceCapture: clean,
+    });
     proxyGroup.add(torsoMesh);
     pickableMeshes.push(torsoMesh);
 
@@ -639,6 +633,95 @@ export function applyActiveViewerVisibility(
     hiddenObjectId: ownObjectId,
     hiddenAttendeeProxyId: `proxy_attendee_torso_${activeAttendeeId}`,
   };
+}
+
+/**
+ * Updates all articulated attendee avatars in `attendeeProxyNodesById` for a given `elapsedSec`
+ * within `simResult` (interpolating smoothly between 0.2s simulation frames).
+ * When `simResult` is null/undefined, resets all avatars to their seated poses.
+ */
+export function updateSceneEvacuationStep(
+  attendeeProxyNodesById: Map<string, THREE.Object3D>,
+  simResult: EvacuationSimResult | null | undefined,
+  elapsedSec: number,
+): {
+  exitedCount: number;
+  queuingCount: number;
+  activeCount: number;
+} {
+  if (!simResult || simResult.frames.length === 0) {
+    for (const node of attendeeProxyNodesById.values()) {
+      updateAvatarAnimationPose(node as THREE.Group, undefined, 0);
+    }
+    return {
+      exitedCount: 0,
+      queuingCount: 0,
+      activeCount: attendeeProxyNodesById.size,
+    };
+  }
+
+  const clampedTime = Math.max(
+    0,
+    Math.min(simResult.durationSec, elapsedSec),
+  );
+
+  // Locate surrounding frames for smooth linear interpolation
+  let f0 = simResult.frames[0]!;
+  let f1 = simResult.frames[simResult.frames.length - 1]!;
+  for (let i = 0; i < simResult.frames.length - 1; i++) {
+    const curr = simResult.frames[i]!;
+    const next = simResult.frames[i + 1]!;
+    if (clampedTime >= curr.timeSec && clampedTime <= next.timeSec) {
+      f0 = curr;
+      f1 = next;
+      break;
+    }
+  }
+
+  const span = Math.max(1e-4, f1.timeSec - f0.timeSec);
+  const alpha = Math.max(0, Math.min(1, (clampedTime - f0.timeSec) / span));
+
+  let exitedCount = 0;
+  let queuingCount = 0;
+  let activeCount = 0;
+
+  for (const [attendeeId, node] of attendeeProxyNodesById.entries()) {
+    const s0 = f0.agents[attendeeId];
+    const s1 = f1.agents[attendeeId] ?? s0;
+    if (!s0) continue;
+
+    const interpX = s0.position[0] + (s1!.position[0] - s0.position[0]) * alpha;
+    const interpZ = s0.position[1] + (s1!.position[1] - s0.position[1]) * alpha;
+
+    // Shortest-angle yaw interpolation
+    let dYaw = ((s1!.yawDeg - s0.yawDeg + 540) % 360) - 180;
+    const interpYaw = s0.yawDeg + dYaw * alpha;
+    const interpSpeed = s0.speedMps + (s1!.speedMps - s0.speedMps) * alpha;
+    const state = alpha < 0.5 ? s0.state : s1!.state;
+
+    if (state === 'exited') {
+      exitedCount += 1;
+    } else {
+      activeCount += 1;
+      if (state === 'queuing' || state === 'extricating') {
+        queuingCount += 1;
+      }
+    }
+
+    updateAvatarAnimationPose(
+      node as THREE.Group,
+      {
+        position: [interpX, interpZ],
+        yawDeg: interpYaw,
+        speedMps: interpSpeed,
+        state,
+        targetExitId: s0.targetExitId,
+      },
+      clampedTime,
+    );
+  }
+
+  return { exitedCount, queuingCount, activeCount };
 }
 
 /**
