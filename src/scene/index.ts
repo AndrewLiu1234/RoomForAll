@@ -10,6 +10,7 @@
  */
 export {
   VenueViewport,
+  computeInitialOrbit,
   type VenueViewportProps,
 } from './VenueViewport.js';
 

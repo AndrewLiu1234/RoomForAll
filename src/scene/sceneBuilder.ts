@@ -150,6 +150,39 @@ export function buildVenueThreeScene(
   floorMesh.name = 'venue_floor';
   scene.add(floorMesh);
 
+  // Subtle architectural 1m floor grid at Y=0.003m for spatial scale & depth perception
+  const gridSpan = Math.max(roomW, roomD);
+  const floorGrid = new THREE.GridHelper(
+    gridSpan,
+    Math.round(gridSpan),
+    0x334155,
+    0x1e293b,
+  );
+  floorGrid.position.set(roomCenterX, 0.003, roomCenterZ);
+  floorGrid.name = 'venue_floor_grid';
+  scene.add(floorGrid);
+
+  // Physical floor accessibility markings for wheelchair bay turning circles (on floor at Y=0.006m)
+  for (const place of snapshot.places) {
+    if (place.turningPadCenter && place.turningPadDiameterM) {
+      const radius = place.turningPadDiameterM / 2;
+      const padRingGeo = new THREE.RingGeometry(radius - 0.035, radius, 40);
+      const padRingMat = new THREE.MeshBasicMaterial({
+        color: 0x60a5fa,
+        side: THREE.DoubleSide,
+      });
+      const padRingMesh = new THREE.Mesh(padRingGeo, padRingMat);
+      padRingMesh.rotation.x = -Math.PI / 2;
+      padRingMesh.position.set(
+        place.turningPadCenter[0],
+        0.006,
+        place.turningPadCenter[1],
+      );
+      padRingMesh.name = `floor_marking_turning_pad_${place.id}`;
+      scene.add(padRingMesh);
+    }
+  }
+
   // Low subtle perimeter baseboard / stage back wall so viewer has spatial depth cues
   const backWallGeo = new THREE.BoxGeometry(roomW, maxY, 0.12);
   const backWallMat = new THREE.MeshStandardMaterial({

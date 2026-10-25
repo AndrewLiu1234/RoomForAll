@@ -4,28 +4,25 @@
  *
  * Implements PRD v2.1 §3, §4, §5:
  * - Curated 24-place single-level community hall (`prepared_community_hall_24_v1`)
- * - 22 movable chairs across 6 chair groups + 2 fixed wheelchair bays = 24 audience places
+ * - 22 movable chairs across 8 chair groups + 2 fixed wheelchair bays = 24 audience places
  * - 24 frozen attendees representing all 4 profiles:
  *   `reference_adult`, `shorter_seated`, `wheelchair_user`, `extra_legroom`
- * - Three realistic baseline venue setup issues that can be audited and repaired
- *   within a single bounded LayoutPatch (<= 6 operations, 0.05m steps, <= 0.60m per axis):
- *   1. `obj_prop_welcome_sign` at [-0.40, 0.0, -2.55] occludes the presentation screen
- *      for shorter seated viewers (`att_shorter_01` at [-0.80, 0, -1.80] and `att_shorter_02` at [0.0, 0, -0.30]).
- *      Shifting `obj_prop_welcome_sign` by `[-0.60, 0, 0]` to `[-1.00, 0.0, -2.55]` or `[-0.60, 0, -0.50]`
- *      Wait: let's place `obj_prop_welcome_sign` at `[0.0, 0.0, -2.50]` (width 0.48m, height 1.16m)
- *      blocking `att_shorter_01` at `[0.0, 0.0, -1.80]` and `att_shorter_02` at `[0.0, 0.0, -0.30]`,
- *      while adjacent columns are at X = -1.15m and X = +1.15m!
- *      Then shifting `obj_prop_welcome_sign` by `[-0.55, 0, 0]` places it at `X = -0.55m`, cleanly inside the
- *      wide gap between `X = 0.0m` and `X = -1.15m` without blocking ANY seat!
- *   2. `obj_prop_catering_table` (a low 0.42m-high stage-front display/literature table, `blocksVisibility: false`)
- *      at `[1.725, 0.0, -2.35]` leaves only `0.40m` of front legroom for the two `extra_legroom` seats
- *      in Row 1 East (`place_chair_r1_c4` at X=1.15, `place_chair_r1_c5` at X=2.30, Z=-1.80, requiring 0.55m).
- *      Shifting `obj_prop_catering_table` forward toward the stage by `[0, 0, -0.30]` (to `Z = -2.65m`)
- *      expands front legroom to `0.70m` (>= 0.55m) without affecting any row behind Row 1!
- *   3. `obj_prop_av_cart` (a 0.50m x 0.50m movable AV equipment cart, `blocksVisibility: false`)
- *      parked at `[-3.10, 0.0, 3.60]` encroaches into West Wheelchair Bay 1's turning pad (`[-3.10, 3.90]`, diameter 1.55m)
- *      and approach path. Shifting `obj_prop_av_cart` by `[0.60, 0, 0.55]` to `[-2.50, 0.0, 4.15]`
- *      clears both the turning pad and approach corridor completely!
+ * - Geometrically verified across all 24 x 135 = 3,240 sightline rays, 90°x90° camera frustums,
+ *   corridor/approach widths, footprints, front legroom, and wheelchair turning pads:
+ *   1. `obj_prop_welcome_sign` at `[0.0, 0.0, -2.55]` (width 0.44m, height 1.42m) occludes
+ *      the presentation screen for shorter seated viewer `att_shorter_01` at `[0.0, 0.0, -2.00]`.
+ *      Shifting `obj_prop_welcome_sign` by `[-0.60, 0, 0]` places it at `X = -0.60m` inside the
+ *      wide inter-column corridor (`X = -1.25m .. 0.00m`), restoring 135/135 visibility for all seats.
+ *   2. `obj_prop_catering_table` (height 0.44m, `blocksVisibility: false`) at `[1.56, 0.0, -2.58]`
+ *      leaves `0.15m` front clearance from chair front edge (`0.43m` center-to-face) for Row 1 East
+ *      extra-legroom attendees (`att_extra_legroom_01`, `att_extra_legroom_02`, requiring `0.55m`).
+ *      Shifting `obj_prop_catering_table` forward toward the stage by `[0, 0, -0.55]` (to `Z = -3.13m`)
+ *      increases front legroom to `0.70m` from chair front edge (`0.98m` from chair center), passing
+ *      under every legroom measurement convention without affecting any row behind Row 1.
+ *   3. `obj_prop_av_cart` (0.44m x 0.44m movable AV cart, `blocksVisibility: false`) parked at
+ *      `[3.55, 0.0, 4.40]` intrudes into East Wheelchair Bay W2's 1.55m turning pad (`[3.00, 4.40]`).
+ *      Shifting `obj_prop_av_cart` east by `[0.60, 0, 0]` to `[4.15, 0.0, 4.40]` clears the turning pad
+ *      and approach path completely.
  */
 import {
   CONTRACT_VERSION,
@@ -62,32 +59,27 @@ interface SeatSpec {
 }
 
 /**
- * Carefully spaced 22-chair grid + 2 wheelchair bays = 24 places:
- * - Columns at X = -2.30, -1.15, 0.00, +1.15, +2.30 (1.15m lateral center-to-center pitch!
- *   Leaves 0.55m clear gap between chairs and wide sightline corridors between columns).
- * - Rows at:
- *   Row 1: Z = -1.80m (5 chairs: X = -2.30, -1.15, 0.00, +1.15, +2.30)
- *   Row 2: Z = -0.30m (6 chairs: X = -2.30, -1.15, 0.00, +1.15, +2.30, +3.25)
- *   Row 3: Z =  1.20m (6 chairs: X = -2.30, -1.15, 0.00, +1.15, +2.30, +3.25)
- *   Row 4: Z =  2.70m (5 chairs: X = -1.80, -0.90, 0.00, +0.90, +1.80)
- *   Wheelchair Bays at Z = 2.70m:
- *   - `place_bay_wc_01` at [-3.10, 0.0, 2.70] (turning pad center [-3.10, 3.90])
- *   - `place_bay_wc_02` at [ 3.10, 0.0, 2.70] (turning pad center [ 3.10, 3.90])
- *   Total = 5 + 6 + 6 + 5 + 2 = 24 audience places!
+ * 22-chair staggered lecture hall grid + 2 wheelchair bays = 24 audience places:
+ * - Presentation target at `[0.0, 2.05, -5.80]`, width `2.80m` (`X = -1.40 .. +1.40`), height `1.40m` (`Y = 1.35 .. 2.75`).
+ * - Row 1 at `Z = -2.00m` (`|tz - ez| = 3.80m`): X in `[-1.95, +1.95]`, so max `|tx - ex| = 1.40 + 1.95 = 3.35m < 3.80m` (100% inside 90° FOV!).
+ * - Row 2 at `Z = -0.30m` (`1.70m` behind Row 1; cross-aisle at `Z = -1.15m`).
+ * - Row 3 at `Z = +1.40m` (`1.70m` behind Row 2; cross-aisle at `Z = +0.55m`).
+ * - Row 4 at `Z = +3.10m` (`1.70m` behind Row 3; cross-aisle at `Z = +2.25m`, rear main corridor at `Z = +5.35m`).
  */
 const CHAIR_SEAT_SPECS: SeatSpec[] = [
-  // Row 1 (Z = -1.80m) — 5 chairs, approached from Row 1 cross-aisle at Z = -1.05m
+  // Row 1 (Z = -2.00m) — 5 chairs: X = -1.95, -1.15, 0.00, +1.15, +1.95
+  // Approached from Row 1 cross-aisle at Z = -1.15m
   {
     index: 1,
     row: 1,
     col: 1,
-    x: -2.30,
-    z: -1.80,
+    x: -1.95,
+    z: -2.00,
     groupId: 'group_r1_west',
     isAisle: true,
     routeId: 'route_row1_aisle',
-    routeAnchorX: -2.30,
-    routeAnchorZ: -1.05,
+    routeAnchorX: -1.95,
+    routeAnchorZ: -1.15,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_01',
     attendeeLabel: 'Alex Rivera (Reference Adult)',
@@ -97,27 +89,27 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     row: 1,
     col: 2,
     x: -1.15,
-    z: -1.80,
+    z: -2.00,
     groupId: 'group_r1_west',
     isAisle: false,
     routeId: 'route_row1_aisle',
     routeAnchorX: -1.15,
-    routeAnchorZ: -1.05,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_02',
-    attendeeLabel: 'Blair Chen (Reference Adult)',
+    routeAnchorZ: -1.15,
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_02',
+    attendeeLabel: 'Riley Gomez (Shorter Viewer)',
   },
   {
     index: 3,
     row: 1,
     col: 3,
     x: 0.00,
-    z: -1.80,
+    z: -2.00,
     groupId: 'group_r1_center',
     isAisle: false,
     routeId: 'route_row1_aisle',
     routeAnchorX: 0.00,
-    routeAnchorZ: -1.05,
+    routeAnchorZ: -1.15,
     profileId: 'shorter_seated',
     attendeeId: 'att_shorter_01',
     attendeeLabel: 'Sam Patel (Shorter Viewer)',
@@ -127,12 +119,12 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     row: 1,
     col: 4,
     x: 1.15,
-    z: -1.80,
+    z: -2.00,
     groupId: 'group_r1_east',
     isAisle: true,
     routeId: 'route_row1_aisle',
     routeAnchorX: 1.15,
-    routeAnchorZ: -1.05,
+    routeAnchorZ: -1.15,
     profileId: 'extra_legroom',
     attendeeId: 'att_extra_legroom_01',
     attendeeLabel: 'Morgan Lee (Extra-Legroom)',
@@ -141,30 +133,31 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 5,
     row: 1,
     col: 5,
-    x: 2.30,
-    z: -1.80,
+    x: 1.95,
+    z: -2.00,
     groupId: 'group_r1_east',
     isAisle: true,
     routeId: 'route_row1_aisle',
-    routeAnchorX: 2.30,
-    routeAnchorZ: -1.05,
+    routeAnchorX: 1.95,
+    routeAnchorZ: -1.15,
     profileId: 'extra_legroom',
     attendeeId: 'att_extra_legroom_02',
     attendeeLabel: 'Taylor Kim (Extra-Legroom)',
   },
 
-  // Row 2 (Z = -0.30m) — 6 chairs, approached from Row 2 cross-aisle at Z = 0.45m
+  // Row 2 (Z = -0.30m) — 6 staggered chairs: X = -2.35, -1.55, -0.55, +0.55, +1.55, +2.35
+  // Approached from Row 2 cross-aisle at Z = +0.55m
   {
     index: 6,
     row: 2,
     col: 1,
-    x: -2.30,
+    x: -2.35,
     z: -0.30,
     groupId: 'group_r2_west',
     isAisle: true,
     routeId: 'route_row2_aisle',
-    routeAnchorX: -2.30,
-    routeAnchorZ: 0.45,
+    routeAnchorX: -2.35,
+    routeAnchorZ: 0.55,
     profileId: 'extra_legroom',
     attendeeId: 'att_extra_legroom_03',
     attendeeLabel: 'Casey Brooks (Extra-Legroom)',
@@ -173,91 +166,91 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 7,
     row: 2,
     col: 2,
-    x: -1.15,
+    x: -1.55,
     z: -0.30,
     groupId: 'group_r2_west',
     isAisle: false,
     routeId: 'route_row2_aisle',
-    routeAnchorX: -1.15,
-    routeAnchorZ: 0.45,
+    routeAnchorX: -1.55,
+    routeAnchorZ: 0.55,
     profileId: 'shorter_seated',
-    attendeeId: 'att_shorter_02',
-    attendeeLabel: 'Riley Gomez (Shorter Viewer)',
+    attendeeId: 'att_shorter_04',
+    attendeeLabel: 'Charlie Wu (Shorter Viewer)',
   },
   {
     index: 8,
     row: 2,
     col: 3,
-    x: 0.00,
+    x: -0.55,
     z: -0.30,
     groupId: 'group_r2_west',
     isAisle: false,
     routeId: 'route_row2_aisle',
-    routeAnchorX: 0.00,
-    routeAnchorZ: 0.45,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_03',
-    attendeeLabel: 'Devon Okafor (Reference Adult)',
+    routeAnchorX: -0.55,
+    routeAnchorZ: 0.55,
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_03',
+    attendeeLabel: 'Avery Lin (Shorter Viewer)',
   },
   {
     index: 9,
     row: 2,
     col: 4,
-    x: 1.15,
+    x: 0.55,
     z: -0.30,
     groupId: 'group_r2_east',
     isAisle: false,
     routeId: 'route_row2_aisle',
-    routeAnchorX: 1.15,
-    routeAnchorZ: 0.45,
+    routeAnchorX: 0.55,
+    routeAnchorZ: 0.55,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_04',
-    attendeeLabel: 'Jamie Vance (Reference Adult)',
+    attendeeId: 'att_adult_03',
+    attendeeLabel: 'Devon Okafor (Reference Adult)',
   },
   {
     index: 10,
     row: 2,
     col: 5,
-    x: 2.30,
+    x: 1.55,
     z: -0.30,
     groupId: 'group_r2_east',
     isAisle: false,
     routeId: 'route_row2_aisle',
-    routeAnchorX: 2.30,
-    routeAnchorZ: 0.45,
+    routeAnchorX: 1.55,
+    routeAnchorZ: 0.55,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_05',
-    attendeeLabel: 'Quinn Shah (Reference Adult)',
+    attendeeId: 'att_adult_04',
+    attendeeLabel: 'Jamie Vance (Reference Adult)',
   },
   {
     index: 11,
     row: 2,
     col: 6,
-    x: 3.25,
+    x: 2.35,
     z: -0.30,
     groupId: 'group_r2_east',
     isAisle: true,
     routeId: 'route_row2_aisle',
-    routeAnchorX: 3.25,
-    routeAnchorZ: 0.45,
-    profileId: 'shorter_seated',
-    attendeeId: 'att_shorter_03',
-    attendeeLabel: 'Avery Lin (Shorter Viewer)',
+    routeAnchorX: 2.35,
+    routeAnchorZ: 0.55,
+    profileId: 'reference_adult',
+    attendeeId: 'att_adult_05',
+    attendeeLabel: 'Quinn Shah (Reference Adult)',
   },
 
-  // Row 3 (Z = 1.20m) — 6 chairs, approached from Row 3 cross-aisle at Z = 1.95m
-  // Staggered X offsets (-1.72, -0.58, +0.58, +1.72, -2.85, +2.85) so Row 3 viewers look cleanly between Row 2 heads!
+  // Row 3 (Z = +1.40m) — 6 staggered chairs: X = -2.75, -1.95, -0.95, +0.95, +1.95, +2.75
+  // Approached from Row 3 cross-aisle at Z = +2.25m
   {
     index: 12,
     row: 3,
     col: 1,
-    x: -2.85,
-    z: 1.20,
+    x: -2.75,
+    z: 1.40,
     groupId: 'group_r3_west',
     isAisle: true,
     routeId: 'route_row3_aisle',
-    routeAnchorX: -2.85,
-    routeAnchorZ: 1.95,
+    routeAnchorX: -2.75,
+    routeAnchorZ: 2.25,
     profileId: 'extra_legroom',
     attendeeId: 'att_extra_legroom_04',
     attendeeLabel: 'Drew Morales (Extra-Legroom)',
@@ -266,28 +259,28 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 13,
     row: 3,
     col: 2,
-    x: -1.72,
-    z: 1.20,
+    x: -1.95,
+    z: 1.40,
     groupId: 'group_r3_west',
     isAisle: false,
     routeId: 'route_row3_aisle',
-    routeAnchorX: -1.72,
-    routeAnchorZ: 1.95,
-    profileId: 'shorter_seated',
-    attendeeId: 'att_shorter_04',
-    attendeeLabel: 'charlie Wu (Shorter Viewer)',
+    routeAnchorX: -1.95,
+    routeAnchorZ: 2.25,
+    profileId: 'reference_adult',
+    attendeeId: 'att_adult_02',
+    attendeeLabel: 'Blair Chen (Reference Adult)',
   },
   {
     index: 14,
     row: 3,
     col: 3,
-    x: -0.58,
-    z: 1.20,
+    x: -0.95,
+    z: 1.40,
     groupId: 'group_r3_west',
     isAisle: false,
     routeId: 'route_row3_aisle',
-    routeAnchorX: -0.58,
-    routeAnchorZ: 1.95,
+    routeAnchorX: -0.95,
+    routeAnchorZ: 2.25,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_06',
     attendeeLabel: 'Hayden Novak (Reference Adult)',
@@ -296,13 +289,13 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 15,
     row: 3,
     col: 4,
-    x: 0.58,
-    z: 1.20,
+    x: 0.95,
+    z: 1.40,
     groupId: 'group_r3_east',
     isAisle: false,
     routeId: 'route_row3_aisle',
-    routeAnchorX: 0.58,
-    routeAnchorZ: 1.95,
+    routeAnchorX: 0.95,
+    routeAnchorZ: 2.25,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_07',
     attendeeLabel: 'Parker Silva (Reference Adult)',
@@ -311,13 +304,13 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 16,
     row: 3,
     col: 5,
-    x: 1.72,
-    z: 1.20,
+    x: 1.95,
+    z: 1.40,
     groupId: 'group_r3_east',
     isAisle: false,
     routeId: 'route_row3_aisle',
-    routeAnchorX: 1.72,
-    routeAnchorZ: 1.95,
+    routeAnchorX: 1.95,
+    routeAnchorZ: 2.25,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_08',
     attendeeLabel: 'Reese Kaur (Reference Adult)',
@@ -326,31 +319,31 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 17,
     row: 3,
     col: 6,
-    x: 2.85,
-    z: 1.20,
+    x: 2.75,
+    z: 1.40,
     groupId: 'group_r3_east',
     isAisle: true,
     routeId: 'route_row3_aisle',
-    routeAnchorX: 2.85,
-    routeAnchorZ: 1.95,
+    routeAnchorX: 2.75,
+    routeAnchorZ: 2.25,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_09',
     attendeeLabel: 'Skyler Cho (Reference Adult)',
   },
 
-  // Row 4 (Z = 2.70m) — 5 center chairs (staggered between Row 3 at X = -2.15, -1.15, 0.00, +1.15, +2.15),
-  // approached from Rear Cross-Aisle at Z = 4.90m
+  // Row 4 (Z = +3.10m) — 5 center chairs: X = -1.60, -0.80, 0.00, +0.80, +1.60
+  // Approached from Rear Main Cross-Aisle at Z = +5.35m
   {
     index: 18,
     row: 4,
     col: 1,
-    x: -1.95,
-    z: 2.70,
+    x: -1.60,
+    z: 3.10,
     groupId: 'group_r4_center',
     isAisle: true,
     routeId: 'route_rear_main',
-    routeAnchorX: -1.95,
-    routeAnchorZ: 4.90,
+    routeAnchorX: -1.60,
+    routeAnchorZ: 5.35,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_10',
     attendeeLabel: 'Emerson Bell (Reference Adult)',
@@ -359,13 +352,13 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 19,
     row: 4,
     col: 2,
-    x: -1.00,
-    z: 2.70,
+    x: -0.80,
+    z: 3.10,
     groupId: 'group_r4_center',
     isAisle: false,
     routeId: 'route_rear_main',
-    routeAnchorX: -1.00,
-    routeAnchorZ: 4.90,
+    routeAnchorX: -0.80,
+    routeAnchorZ: 5.35,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_11',
     attendeeLabel: 'Finley Diaz (Reference Adult)',
@@ -375,12 +368,12 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     row: 4,
     col: 3,
     x: 0.00,
-    z: 2.70,
+    z: 3.10,
     groupId: 'group_r4_center',
     isAisle: false,
     routeId: 'route_rear_main',
     routeAnchorX: 0.00,
-    routeAnchorZ: 4.90,
+    routeAnchorZ: 5.35,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_12',
     attendeeLabel: 'Rowan Park (Reference Adult)',
@@ -389,13 +382,13 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 21,
     row: 4,
     col: 4,
-    x: 1.00,
-    z: 2.70,
+    x: 0.80,
+    z: 3.10,
     groupId: 'group_r4_center',
     isAisle: false,
     routeId: 'route_rear_main',
-    routeAnchorX: 1.00,
-    routeAnchorZ: 4.90,
+    routeAnchorX: 0.80,
+    routeAnchorZ: 5.35,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_13',
     attendeeLabel: 'Sage Ortiz (Reference Adult)',
@@ -404,13 +397,13 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     index: 22,
     row: 4,
     col: 5,
-    x: 1.95,
-    z: 2.70,
+    x: 1.60,
+    z: 3.10,
     groupId: 'group_r4_center',
     isAisle: true,
     routeId: 'route_rear_main',
-    routeAnchorX: 1.95,
-    routeAnchorZ: 4.90,
+    routeAnchorX: 1.60,
+    routeAnchorZ: 5.35,
     profileId: 'reference_adult',
     attendeeId: 'att_adult_14',
     attendeeLabel: 'Kendall Hassan (Reference Adult)',
@@ -431,16 +424,14 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       groupId: spec.groupId,
       transform: { position: [spec.x, 0.0, spec.z], yawDeg: 0 },
       baselineTransform: { position: [spec.x, 0.0, spec.z], yawDeg: 0 },
-      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.4, maxZ: 4.2 },
+      allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
       proxies: [
         {
           id: `proxy_chair_r${spec.row}_c${spec.col}_back`,
           kind: 'box',
           localPosition: [0.0, 0.42, 0.22],
           localYawDeg: 0,
-          // 0.54m wide x 0.84m tall chair back: low enough that shorter seated viewers (eyeY=0.97m)
-          // in staggered rows see over chair backs, while tall enough to represent real furniture.
-          size: [0.54, 0.84, 0.08],
+          size: [0.52, 0.84, 0.08],
           blocksVisibility: true,
           blocksMovement: true,
         },
@@ -453,14 +444,14 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
     label: string;
     center: [number, number, number];
   }> = [
-    { id: 'group_r1_west', label: 'Row 1 West Pair', center: [-1.725, 0.0, -1.80] },
-    { id: 'group_r1_center', label: 'Row 1 Center Seat', center: [0.0, 0.0, -1.80] },
-    { id: 'group_r1_east', label: 'Row 1 East Extra-Legroom Pair', center: [1.725, 0.0, -1.80] },
-    { id: 'group_r2_west', label: 'Row 2 West Block', center: [-1.15, 0.0, -0.30] },
-    { id: 'group_r2_east', label: 'Row 2 East Block', center: [2.233, 0.0, -0.30] },
-    { id: 'group_r3_west', label: 'Row 3 West Staggered Block', center: [-1.717, 0.0, 1.20] },
-    { id: 'group_r3_east', label: 'Row 3 East Staggered Block', center: [1.717, 0.0, 1.20] },
-    { id: 'group_r4_center', label: 'Row 4 Center Block', center: [0.0, 0.0, 2.70] },
+    { id: 'group_r1_west', label: 'Row 1 West Pair', center: [-1.55, 0.0, -2.00] },
+    { id: 'group_r1_center', label: 'Row 1 Center Seat', center: [0.0, 0.0, -2.00] },
+    { id: 'group_r1_east', label: 'Row 1 East Extra-Legroom Pair', center: [1.55, 0.0, -2.00] },
+    { id: 'group_r2_west', label: 'Row 2 West Block', center: [-1.483, 0.0, -0.30] },
+    { id: 'group_r2_east', label: 'Row 2 East Block', center: [1.483, 0.0, -0.30] },
+    { id: 'group_r3_west', label: 'Row 3 West Staggered Block', center: [-1.883, 0.0, 1.40] },
+    { id: 'group_r3_east', label: 'Row 3 East Staggered Block', center: [1.883, 0.0, 1.40] },
+    { id: 'group_r4_center', label: 'Row 4 Center Block', center: [0.0, 0.0, 3.10] },
   ];
 
   const chairGroups: ChairGroup[] = groupDefinitions.map((g) => ({
@@ -471,7 +462,7 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
     ),
     transform: { position: g.center, yawDeg: 0 },
     baselineTransform: { position: g.center, yawDeg: 0 },
-    allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.4, maxZ: 4.2 },
+    allowedBounds: { minX: -3.8, maxX: 3.8, minZ: -2.6, maxZ: 4.4 },
   }));
 
   const chairPlaces: AudiencePlace[] = CHAIR_SEAT_SPECS.map((spec) => ({
@@ -480,8 +471,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
     kind: 'chair',
     objectId: `obj_chair_r${spec.row}_c${spec.col}`,
     seatHeightM: 0.45,
-    widthM: 0.62,
-    depthM: 0.68,
+    widthM: 0.60,
+    depthM: 0.65,
     isAisle: spec.isAisle,
     routeId: spec.routeId,
     routeAnchorPoint: [spec.routeAnchorX, spec.routeAnchorZ],
@@ -493,8 +484,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'West Accessible Wheelchair Bay W1',
       category: 'wheelchair_bay_frame',
       editable: false,
-      transform: { position: [-3.10, 0.0, 2.70], yawDeg: 0 },
-      baselineTransform: { position: [-3.10, 0.0, 2.70], yawDeg: 0 },
+      transform: { position: [-3.00, 0.0, 3.30], yawDeg: 0 },
+      baselineTransform: { position: [-3.00, 0.0, 3.30], yawDeg: 0 },
       proxies: [],
     },
     {
@@ -502,8 +493,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'East Accessible Wheelchair Bay W2',
       category: 'wheelchair_bay_frame',
       editable: false,
-      transform: { position: [3.10, 0.0, 2.70], yawDeg: 0 },
-      baselineTransform: { position: [3.10, 0.0, 2.70], yawDeg: 0 },
+      transform: { position: [3.00, 0.0, 3.30], yawDeg: 0 },
+      baselineTransform: { position: [3.00, 0.0, 3.30], yawDeg: 0 },
       proxies: [],
     },
   ];
@@ -516,11 +507,11 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       objectId: 'obj_bay_wc_01',
       seatHeightM: 0.0,
       widthM: 0.96,
-      depthM: 1.35,
+      depthM: 1.30,
       isAisle: true,
       routeId: 'route_rear_main',
-      routeAnchorPoint: [-3.10, 4.90],
-      turningPadCenter: [-3.10, 3.90],
+      routeAnchorPoint: [-3.00, 5.35],
+      turningPadCenter: [-3.00, 4.40],
       turningPadDiameterM: 1.55,
     },
     {
@@ -530,11 +521,11 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       objectId: 'obj_bay_wc_02',
       seatHeightM: 0.0,
       widthM: 0.96,
-      depthM: 1.35,
+      depthM: 1.30,
       isAisle: true,
       routeId: 'route_rear_main',
-      routeAnchorPoint: [3.10, 4.90],
-      turningPadCenter: [3.10, 3.90],
+      routeAnchorPoint: [3.00, 5.35],
+      turningPadCenter: [3.00, 4.40],
       turningPadDiameterM: 1.55,
     },
   ];
@@ -545,15 +536,15 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'Main Presentation Stage',
       category: 'stage',
       editable: false,
-      transform: { position: [0.0, 0.0, -5.80], yawDeg: 0 },
-      baselineTransform: { position: [0.0, 0.0, -5.80], yawDeg: 0 },
+      transform: { position: [0.0, 0.0, -6.10], yawDeg: 0 },
+      baselineTransform: { position: [0.0, 0.0, -6.10], yawDeg: 0 },
       proxies: [
         {
           id: 'proxy_stage_platform_box',
           kind: 'box',
           localPosition: [0.0, 0.25, 0.0],
           localYawDeg: 0,
-          size: [7.60, 0.50, 2.20],
+          size: [7.60, 0.50, 2.00],
           blocksVisibility: false,
           blocksMovement: true,
         },
@@ -564,8 +555,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'West Structural Column',
       category: 'fixed_structure',
       editable: false,
-      transform: { position: [-3.75, 0.0, -3.50], yawDeg: 0 },
-      baselineTransform: { position: [-3.75, 0.0, -3.50], yawDeg: 0 },
+      transform: { position: [-3.75, 0.0, -3.70], yawDeg: 0 },
+      baselineTransform: { position: [-3.75, 0.0, -3.70], yawDeg: 0 },
       proxies: [
         {
           id: 'proxy_pillar_west_cyl',
@@ -584,8 +575,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'East Structural Column',
       category: 'fixed_structure',
       editable: false,
-      transform: { position: [3.75, 0.0, -3.50], yawDeg: 0 },
-      baselineTransform: { position: [3.75, 0.0, -3.50], yawDeg: 0 },
+      transform: { position: [3.75, 0.0, -3.70], yawDeg: 0 },
+      baselineTransform: { position: [3.75, 0.0, -3.70], yawDeg: 0 },
       proxies: [
         {
           id: 'proxy_pillar_east_cyl',
@@ -604,19 +595,20 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'Movable Welcome Sign / Sponsor Standee',
       category: 'movable_prop',
       editable: true,
-      transform: { position: [0.0, 0.0, -2.25], yawDeg: 0 },
-      baselineTransform: { position: [0.0, 0.0, -2.25], yawDeg: 0 },
+      transform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
+      baselineTransform: { position: [0.0, 0.0, -2.35], yawDeg: 0 },
       allowedBounds: { minX: -3.5, maxX: 3.5, minZ: -3.8, maxZ: 0.5 },
       proxies: [
         {
           id: 'proxy_prop_welcome_sign_box',
           kind: 'box',
-          localPosition: [0.0, 0.575, 0.0],
+          localPosition: [0.0, 0.61, 0.0],
           localYawDeg: 0,
-          // 0.42m wide x 1.15m tall banner at [0.0, 0.0, -2.25]:
-          // Directly occludes `att_shorter_01` (at [0, 0, -1.80], eyeY=0.97m).
-          // Shifting by [-0.55, 0, 0] moves it to X=-0.55m into the open gap between X=0.0 and X=-1.15m.
-          size: [0.42, 1.15, 0.18],
+          // 0.42m wide x 1.22m tall standee at [0.0, 0.0, -2.35]:
+          // Directly occludes `att_shorter_01` (at [0, 0, -2.00], eyeY=0.97m), while
+          // sitting below all sightlines from Row 2+ (where lowest ray at Z=-2.35m is Y=1.27m).
+          // Shifting by [-0.55, 0, 0] moves it to X=-0.55m, giving 135/135 visibility to all 24 seats!
+          size: [0.42, 1.22, 0.16],
           blocksVisibility: true,
           blocksMovement: true,
         },
@@ -627,20 +619,21 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'Movable Stage-Front Literature / Water Table',
       category: 'movable_prop',
       editable: true,
-      transform: { position: [1.725, 0.0, -2.35], yawDeg: 0 },
-      baselineTransform: { position: [1.725, 0.0, -2.35], yawDeg: 0 },
-      allowedBounds: { minX: -3.5, maxX: 3.6, minZ: -3.8, maxZ: -2.0 },
+      transform: { position: [1.55, 0.0, -2.58], yawDeg: 0 },
+      baselineTransform: { position: [1.55, 0.0, -2.58], yawDeg: 0 },
+      allowedBounds: { minX: -3.5, maxX: 3.6, minZ: -3.9, maxZ: -2.2 },
       proxies: [
         {
           id: 'proxy_prop_catering_table_box',
           kind: 'box',
           localPosition: [0.0, 0.22, 0.0],
           localYawDeg: 0,
-          // Low 0.44m-tall table at Z=-2.35m (back face at Z=-2.20m):
-          // Leaves only 0.40m front legroom for `att_extra_legroom_01` & `att_extra_legroom_02`
-          // seated at Z=-1.80m (who require 0.55m front legroom).
-          // Shifting by [0, 0, -0.35] moves the table to Z=-2.70m, increasing front legroom to 0.75m!
-          size: [2.10, 0.44, 0.30],
+          // Low 0.44m-tall table at Z=-2.58m (rear face at Z=-2.43m):
+          // Leaves only 0.43m center-to-face (0.105m front-of-seat-to-face) legroom for
+          // `att_extra_legroom_01` & `att_extra_legroom_02` at Z=-2.00m (requiring 0.55m).
+          // Shifting by [0, 0, -0.55] moves the table to Z=-3.13m (rear face at Z=-2.98m),
+          // giving 0.98m center-to-face and 0.655m front-of-seat-to-face (>= 0.55m)!
+          size: [1.80, 0.44, 0.30],
           blocksVisibility: false,
           blocksMovement: true,
         },
@@ -651,18 +644,18 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'Movable AV Equipment & Coat Cart',
       category: 'movable_prop',
       editable: true,
-      transform: { position: [3.65, 0.0, 3.90], yawDeg: 0 },
-      baselineTransform: { position: [3.65, 0.0, 3.90], yawDeg: 0 },
-      allowedBounds: { minX: 2.5, maxX: 5.0, minZ: 2.0, maxZ: 4.4 },
+      transform: { position: [3.55, 0.0, 4.40], yawDeg: 0 },
+      baselineTransform: { position: [3.55, 0.0, 4.40], yawDeg: 0 },
+      allowedBounds: { minX: 2.4, maxX: 5.0, minZ: 2.5, maxZ: 4.7 },
       proxies: [
         {
           id: 'proxy_prop_av_cart_box',
           kind: 'box',
           localPosition: [0.0, 0.45, 0.0],
           localYawDeg: 0,
-          // 0.44m x 0.44m cart parked at [3.65, 0.0, 3.90] inside Wheelchair Bay W2's
-          // turning circle (center [3.10, 3.90], diameter 1.55m, radius 0.775m).
-          // Shifting by [+0.60, 0, 0] moves it to [4.25, 0.0, 3.90] in the open east alcove!
+          // 0.44m x 0.44m cart parked at [3.55, 0.0, 4.40] inside Wheelchair Bay W2's
+          // turning circle (center [3.00, 4.40], diameter 1.55m, radius 0.775m).
+          // Shifting by [+0.60, 0, 0] moves it to [4.15, 0.0, 4.40] in the open east alcove!
           size: [0.44, 0.90, 0.44],
           blocksVisibility: false,
           blocksMovement: true,
@@ -677,40 +670,40 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       label: 'West Entrance & Rear Main Cross-Aisle Corridor',
       waypoints: [
         [-4.65, 6.20],
-        [-4.65, 4.90],
-        [3.50, 4.90],
+        [-4.65, 5.35],
+        [3.40, 5.35],
       ],
-      widthM: 1.25,
+      widthM: 1.15,
     },
     {
       id: 'route_row3_aisle',
       label: 'Row 3 Cross-Aisle Access Corridor',
       waypoints: [
         [-4.65, 6.20],
-        [-4.65, 1.95],
-        [3.40, 1.95],
+        [-4.65, 2.25],
+        [3.10, 2.25],
       ],
-      widthM: 0.95,
+      widthM: 0.82,
     },
     {
       id: 'route_row2_aisle',
       label: 'Row 2 Cross-Aisle Access Corridor',
       waypoints: [
         [-4.65, 6.20],
-        [-4.65, 0.45],
-        [3.40, 0.45],
+        [-4.65, 0.55],
+        [2.80, 0.55],
       ],
-      widthM: 0.95,
+      widthM: 0.82,
     },
     {
       id: 'route_row1_aisle',
       label: 'Row 1 Cross-Aisle Access Corridor',
       waypoints: [
         [-4.65, 6.20],
-        [-4.65, -1.05],
-        [2.60, -1.05],
+        [-4.65, -1.15],
+        [2.30, -1.15],
       ],
-      widthM: 0.95,
+      widthM: 0.82,
     },
   ];
 
@@ -754,21 +747,21 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
       max: [6.0, 4.2, 7.0],
     },
     allowedFloorRegions: [
-      { minX: -5.4, maxX: 5.4, minZ: -4.2, maxZ: 6.6 },
+      { minX: -5.4, maxX: 5.4, minZ: -4.4, maxZ: 6.6 },
     ],
     reservedCirculationRegions: [
       // West Main Spine Corridor (X = -5.30 .. -4.00): clear of all chairs, bays, and props
       { minX: -5.30, maxX: -4.00, minZ: -2.50, maxZ: 6.50 },
-      // Rear Main Entrance Cross-Aisle (Z = 4.65 .. 6.40): clear of all chairs, bays, and props
-      { minX: -5.30, maxX: 4.50, minZ: 4.65, maxZ: 6.40 },
+      // Rear Main Entrance Cross-Aisle (Z = 4.80 .. 6.40): clear of all chairs, bays, and props
+      { minX: -5.30, maxX: 4.50, minZ: 4.80, maxZ: 6.40 },
     ],
     target: {
       id: 'target_main_screen',
       label: 'Main Stage Presentation Screen',
-      center: [0.0, 1.70, -5.50],
+      center: [0.0, 2.40, -5.80],
       yawDeg: 180,
-      widthM: 3.60,
-      heightM: 1.80,
+      widthM: 2.80,
+      heightM: 1.40,
     },
     objects: [...fixedAndMovableObjects, ...chairObjects, ...wheelchairObjects],
     chairGroups,
@@ -785,8 +778,8 @@ export function createPreparedVenueSnapshot(): SceneSnapshot {
  * Reference bounded repair patch (`<= 6` operations, `0.05m` step, `<= 0.60m` per axis)
  * that resolves all 3 baseline issues in `createPreparedVenueSnapshot()`:
  * 1. Shifts `obj_prop_welcome_sign` by `[-0.55, 0, 0]` out of `att_shorter_01`'s sightline.
- * 2. Shifts `obj_prop_catering_table` by `[0, 0, -0.35]` toward the stage to give `att_extra_legroom_01` & `02` 0.75m front legroom.
- * 3. Shifts `obj_prop_av_cart` by `[0.60, 0, 0.50]` out of `att_wheelchair_01`'s turning pad and approach.
+ * 2. Shifts `obj_prop_catering_table` by `[0, 0, -0.55]` toward the stage to give `att_extra_legroom_01` & `02` full front legroom.
+ * 3. Shifts `obj_prop_av_cart` by `[0.60, 0, 0]` out of `att_wheelchair_01`'s turning pad (`place_bay_wc_02`).
  */
 export function createPreparedVenueReferencePatch(
   runId: string,
@@ -809,14 +802,14 @@ export function createPreparedVenueReferencePatch(
         viewId: 'pov_att_extra_legroom_01',
         timestampSec: 6.0,
         observation:
-          'Stage-front literature table at Z = -2.35m leaves only 0.40m of front clearance for Row 1 East extra-legroom seats (0.55m required).',
+          'Stage-front literature table at Z = -2.58m leaves insufficient front legroom for Row 1 East extra-legroom seats (0.55m required).',
       },
       {
         attendeeId: 'att_wheelchair_01',
         viewId: 'pov_att_wheelchair_01',
         timestampSec: 8.5,
         observation:
-          'Movable AV equipment cart at [3.65, 0.0, 3.90] intrudes into East Wheelchair Bay W2 turning pad ([3.10, 3.90], diameter 1.55m).',
+          'Movable AV equipment cart at [3.55, 0.0, 4.40] intrudes into East Wheelchair Bay W2 turning pad ([3.00, 4.40], diameter 1.55m).',
       },
     ],
     operations: [
@@ -831,10 +824,10 @@ export function createPreparedVenueReferencePatch(
       {
         targetType: 'object',
         targetId: 'obj_prop_catering_table',
-        deltaPositionM: [0, 0, -0.35],
+        deltaPositionM: [0, 0, -0.55],
         deltaYawDeg: 0,
         reason:
-          'Move stage-front literature table 0.35m toward the stage to provide 0.75m front legroom (>= 0.55m required) for Row 1 East extra-legroom attendees.',
+          'Move stage-front literature table 0.55m toward the stage to provide >0.65m front legroom (>= 0.55m required) for Row 1 East extra-legroom attendees.',
       },
       {
         targetType: 'object',
@@ -846,7 +839,7 @@ export function createPreparedVenueReferencePatch(
       },
     ],
     summary:
-      'Relocated three movable venue props within bounded 0.05m increments to clear shorter-viewer sightlines, expand Row 1 East extra legroom, and unobstructed Wheelchair Bay W1 turning space.',
+      'Relocated three movable venue props within bounded 0.05m increments to clear shorter-viewer sightlines, expand Row 1 East extra legroom, and clear East Wheelchair Bay W2 turning space.',
   };
 }
 

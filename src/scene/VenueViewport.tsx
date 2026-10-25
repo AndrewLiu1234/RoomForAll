@@ -2,17 +2,19 @@
  * Stream A — Interactive 3D Venue & Attendee POV Viewport (`src/scene/VenueViewport.tsx`)
  * Exclusive ownership: Workstream A.
  *
- * Implements PRD §6, §9, §10 Step 2:
- * - Renders `SceneSnapshot` in Three.js with interactive overview orbit/zoom and raycast seat selection.
- * - Supports `attendee_pov` mode using a 1:1 square letterboxed viewport with `90°` H/V FOV
- *   positioned at `getAttendeeCameraPose(snapshot, selectedAttendeeId)` and excluding the
- *   active viewer's own chair and torso proxy so the visual view matches Stream B's evaluator.
- * - Gracefully degrades in headless/non-WebGL test environments and cleans up WebGL contexts on unmount.
+ * Implements PRD §6, §9, §10 Step 2 + `better-ui` & `animate` design-engineering standards:
+ * - Concentric border radii (outer container 12px, HUD cards 8px, inner controls 5px)
+ * - Layered surface elevation shadows + subtle structural alpha borders
+ * - Tactile press scale (`scale(0.97)`), double-ring focus-visible outlines, and reduced-motion support
+ * - Persistent WebGLRenderer across prop updates (so selecting seats or switching `overview` <-> `attendee_pov`
+ *   never recreates/loses the WebGL context or resets the user's orbit angle)
+ * - StrictMode-safe dedicated canvas element per renderer lifecycle with deterministic cleanup on unmount
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   getAttendeeCameraPose,
+  type ProfileId,
   type SceneSnapshot,
 } from '../shared/index.js';
 import {
@@ -25,6 +27,7 @@ import {
   applyActiveViewerVisibility,
   buildVenueThreeScene,
   disposeVenueScene,
+  type BuiltVenueScene,
 } from './sceneBuilder.js';
 
 export interface VenueViewportProps {
@@ -47,7 +50,70 @@ interface OrbitAngles {
   target: [number, number, number];
 }
 
-function computeInitialOrbit(
+const PROFILE_BADGE_META: Record<
+  ProfileId,
+  { label: string; color: string; bg: string }
+> = {
+  reference_adult: {
+    label: 'Reference Adult',
+    color: '#cbd5e1',
+    bg: 'rgba(100, 116, 139, 0.25)',
+  },
+  shorter_seated: {
+    label: 'Shorter Viewer',
+    color: '#7dd3fc',
+    bg: 'rgba(56, 189, 248, 0.22)',
+  },
+  wheelchair_user: {
+    label: 'Wheelchair User',
+    color: '#c4b5fd',
+    bg: 'rgba(167, 139, 250, 0.24)',
+  },
+  extra_legroom: {
+    label: 'Extra-Legroom',
+    color: '#fde68a',
+    bg: 'rgba(251, 191, 36, 0.22)',
+  },
+};
+
+const VIEWPORT_INLINE_CSS = `
+  .vp-preset-btn {
+    padding: 5px 10px;
+    font-size: 0.74rem;
+    font-weight: 500;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(15, 23, 42, 0.75);
+    color: #cbd5e1;
+    cursor: pointer;
+    transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms cubic-bezier(0.16, 1, 0.3, 1), background-color 120ms ease, border-color 120ms ease;
+  }
+  .vp-preset-btn[data-active="true"] {
+    border-color: rgba(56, 189, 248, 0.75);
+    background: rgba(30, 58, 138, 0.82);
+    color: #f8fafc;
+  }
+  .vp-preset-btn:active {
+    transform: scale(0.97);
+  }
+  .vp-preset-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #0f172a, 0 0 0 4px #38bdf8;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .vp-preset-btn:hover {
+      border-color: rgba(148, 163, 184, 0.45);
+      color: #f8fafc;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vp-preset-btn {
+      transition-duration: 0.01ms !important;
+    }
+  }
+`;
+
+export function computeInitialOrbit(
   snapshot: SceneSnapshot,
   preset: OverviewCameraPreset,
 ): OrbitAngles {
@@ -79,7 +145,17 @@ export function VenueViewport({
   style,
 }: VenueViewportProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasHostRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const builtSceneRef = useRef<BuiltVenueScene | null>(null);
+  const orbitRef = useRef<OrbitAngles>(
+    computeInitialOrbit(snapshot, overviewPreset),
+  );
+  const renderFnRef = useRef<(() => void) | null>(null);
+  const onSelectAttendeeRef = useRef(onSelectAttendee);
+  onSelectAttendeeRef.current = onSelectAttendee;
+
   const [activePreset, setActivePreset] =
     useState<OverviewCameraPreset>(overviewPreset);
   const [webglAvailable, setWebglAvailable] = useState<boolean>(true);
@@ -94,6 +170,15 @@ export function VenueViewport({
     [snapshot.roster, selectedAttendeeId],
   );
 
+  const hoveredAttendee = useMemo(
+    () =>
+      hoveredAttendeeId
+        ? snapshot.roster.find((a) => a.attendeeId === hoveredAttendeeId) ??
+          null
+        : null,
+    [snapshot.roster, hoveredAttendeeId],
+  );
+
   const activeAttendeePose = useMemo(() => {
     if (!selectedAttendee) return null;
     try {
@@ -103,14 +188,23 @@ export function VenueViewport({
     }
   }, [snapshot, selectedAttendee]);
 
-  useEffect(() => {
-    setActivePreset(overviewPreset);
-  }, [overviewPreset]);
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
 
   useEffect(() => {
-    const canvas = canvasRef.current;
+    setActivePreset(overviewPreset);
+    orbitRef.current = computeInitialOrbit(snapshot, overviewPreset);
+  }, [overviewPreset, snapshot.sceneId]);
+
+  // 1. Mount/Unmount Effect: Create one dedicated canvas + WebGLRenderer per mount lifecycle
+  useEffect(() => {
+    const host = canvasHostRef.current;
     const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!host || !container || typeof document === 'undefined') return;
+
+    const canvas = document.createElement('canvas');
+    host.innerHTML = '';
+    host.appendChild(canvas);
 
     let renderer: THREE.WebGLRenderer | null = null;
     try {
@@ -125,92 +219,27 @@ export function VenueViewport({
     }
 
     setWebglAvailable(true);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(
+      typeof window !== 'undefined'
+        ? Math.min(window.devicePixelRatio || 1, 2)
+        : 1,
+    );
+    rendererRef.current = renderer;
+    cameraRef.current = new THREE.PerspectiveCamera(52, 1.0, 0.05, 80.0);
 
-    const built = buildVenueThreeScene(snapshot, {
-      cleanForEvidenceCapture: false,
-      selectedAttendeeId: selectedAttendee?.attendeeId,
-      viewMode,
-      showRoutes,
-      showTargetGrid,
-      highlightedObjectIds,
-    });
-
-    const camera = new THREE.PerspectiveCamera(52, 1.0, 0.05, 80.0);
-    const orbit = computeInitialOrbit(snapshot, activePreset);
-
-    const updateViewportAndRender = () => {
-      if (!renderer || !container) return;
-      const rect = container.getBoundingClientRect();
-      const rawW = Math.max(240, Math.floor(rect.width || 640));
-      const rawH = Math.max(240, Math.floor(rect.height || 480));
-
-      if (viewMode === 'attendee_pov' && selectedAttendee) {
-        // PRD §6 & §8.8: 1:1 square viewport letterboxed inside wider container
-        const squareSize = Math.max(200, Math.min(rawW, rawH) - 16);
-        canvas.style.width = `${squareSize}px`;
-        canvas.style.height = `${squareSize}px`;
-        renderer.setSize(squareSize, squareSize, false);
-
-        applyActiveViewerVisibility(
-          built.scene,
-          snapshot,
-          'attendee_pov',
-          selectedAttendee.attendeeId,
-          built.objectNodesById,
-          built.attendeeProxyNodesById,
-        );
-        applyAttendeeCameraPose(
-          camera,
-          snapshot,
-          selectedAttendee.attendeeId,
-        );
-      } else {
-        canvas.style.width = `${rawW}px`;
-        canvas.style.height = `${rawH}px`;
-        renderer.setSize(rawW, rawH, false);
-
-        applyActiveViewerVisibility(
-          built.scene,
-          snapshot,
-          'overview',
-          selectedAttendee?.attendeeId,
-          built.objectNodesById,
-          built.attendeeProxyNodesById,
-        );
-        applyOverviewCameraPose(
-          camera,
-          snapshot,
-          rawW / rawH,
-          activePreset,
-        );
-
-        // Apply interactive orbit spherical coordinates
-        const sinP = Math.sin(orbit.polarRad);
-        const cosP = Math.cos(orbit.polarRad);
-        const cx =
-          orbit.target[0] + orbit.distanceM * sinP * Math.sin(orbit.azimuthRad);
-        const cy = orbit.target[1] + orbit.distanceM * cosP;
-        const cz =
-          orbit.target[2] + orbit.distanceM * sinP * Math.cos(orbit.azimuthRad);
-        camera.position.set(cx, cy, cz);
-        camera.lookAt(orbit.target[0], orbit.target[1], orbit.target[2]);
-        camera.updateMatrixWorld(true);
-      }
-
-      renderer.render(built.scene, camera);
-    };
-
-    updateViewportAndRender();
-
-    // Interactive pointer orbit + click-to-select attendee in overview mode
     let isDragging = false;
     let pointerDownPos: [number, number] = [0, 0];
     let lastPos: [number, number] = [0, 0];
     const raycaster = new THREE.Raycaster();
     const ndcPointer = new THREE.Vector2();
 
-    const resolvePickedAttendee = (clientX: number, clientY: number): string | null => {
+    const resolvePickedAttendee = (
+      clientX: number,
+      clientY: number,
+    ): string | null => {
+      const built = builtSceneRef.current;
+      const camera = cameraRef.current;
+      if (!built || !camera) return null;
       const bounds = canvas.getBoundingClientRect();
       if (bounds.width <= 0 || bounds.height <= 0) return null;
       ndcPointer.x = ((clientX - bounds.left) / bounds.width) * 2 - 1;
@@ -230,14 +259,14 @@ export function VenueViewport({
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      if (viewMode !== 'overview') return;
+      if (viewModeRef.current !== 'overview') return;
       isDragging = true;
       pointerDownPos = [e.clientX, e.clientY];
       lastPos = [e.clientX, e.clientY];
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (viewMode !== 'overview') return;
+      if (viewModeRef.current !== 'overview') return;
       if (!isDragging) {
         const picked = resolvePickedAttendee(e.clientX, e.clientY);
         setHoveredAttendeeId(picked);
@@ -246,71 +275,191 @@ export function VenueViewport({
       const dx = e.clientX - lastPos[0];
       const dy = e.clientY - lastPos[1];
       lastPos = [e.clientX, e.clientY];
-      orbit.azimuthRad -= dx * 0.0075;
-      orbit.polarRad = Math.max(
+      orbitRef.current.azimuthRad -= dx * 0.0075;
+      orbitRef.current.polarRad = Math.max(
         0.18,
-        Math.min(Math.PI * 0.46, orbit.polarRad - dy * 0.0065),
+        Math.min(Math.PI * 0.46, orbitRef.current.polarRad - dy * 0.0065),
       );
-      updateViewportAndRender();
+      renderFnRef.current?.();
     };
 
     const onPointerUp = (e: PointerEvent) => {
-      if (viewMode !== 'overview') return;
+      if (viewModeRef.current !== 'overview') return;
       const moveDist = Math.hypot(
         e.clientX - pointerDownPos[0],
         e.clientY - pointerDownPos[1],
       );
       isDragging = false;
-      if (moveDist < 6 && onSelectAttendee) {
+      if (moveDist < 6 && onSelectAttendeeRef.current) {
         const picked = resolvePickedAttendee(e.clientX, e.clientY);
         if (picked) {
-          onSelectAttendee(picked);
+          onSelectAttendeeRef.current(picked);
         }
       }
     };
 
     const onWheel = (e: WheelEvent) => {
-      if (viewMode !== 'overview') return;
+      if (viewModeRef.current !== 'overview') return;
       e.preventDefault();
-      orbit.distanceM = Math.max(
+      orbitRef.current.distanceM = Math.max(
         3.5,
-        Math.min(26.0, orbit.distanceM + e.deltaY * 0.01),
+        Math.min(26.0, orbitRef.current.distanceM + e.deltaY * 0.01),
       );
-      updateViewportAndRender();
+      renderFnRef.current?.();
+    };
+
+    const onResize = () => {
+      renderFnRef.current?.();
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('resize', updateViewportAndRender);
+    window.addEventListener('resize', onResize);
 
     return () => {
       canvas.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('wheel', onWheel);
-      window.removeEventListener('resize', updateViewportAndRender);
-      disposeVenueScene(built.scene);
-      if (renderer) {
-        renderer.dispose();
+      window.removeEventListener('resize', onResize);
+      if (builtSceneRef.current) {
+        disposeVenueScene(builtSceneRef.current.scene);
+        builtSceneRef.current = null;
+      }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
         try {
-          renderer.forceContextLoss();
+          rendererRef.current.forceContextLoss();
         } catch {
           // Ignore if context loss extension unavailable
         }
+        rendererRef.current = null;
       }
+      cameraRef.current = null;
+      host.innerHTML = '';
     };
+  }, []);
+
+  // 2. Preset Change Effect: Update orbit angles when user clicks an overview camera preset button
+  const handleSelectPreset = (preset: OverviewCameraPreset) => {
+    setActivePreset(preset);
+    orbitRef.current = computeInitialOrbit(snapshot, preset);
+  };
+
+  // 3. Scene & Camera Update Effect: Rebuilds only the lightweight Three.js Scene graph and renders on existing WebGLRenderer
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const container = containerRef.current;
+    if (!renderer || !camera || !container) return;
+
+    if (builtSceneRef.current) {
+      disposeVenueScene(builtSceneRef.current.scene);
+    }
+
+    const built = buildVenueThreeScene(snapshot, {
+      cleanForEvidenceCapture: false,
+      selectedAttendeeId: selectedAttendee?.attendeeId,
+      viewMode,
+      showRoutes,
+      showTargetGrid,
+      highlightedObjectIds,
+    });
+    builtSceneRef.current = built;
+
+    const renderCurrentState = () => {
+      const activeRenderer = rendererRef.current;
+      const activeCamera = cameraRef.current;
+      const activeBuilt = builtSceneRef.current;
+      const activeContainer = containerRef.current;
+      if (!activeRenderer || !activeCamera || !activeBuilt || !activeContainer)
+        return;
+
+      const canvas = activeRenderer.domElement;
+      const rect = activeContainer.getBoundingClientRect();
+      const rawW = Math.max(240, Math.floor(rect.width || 640));
+      const rawH = Math.max(240, Math.floor(rect.height || 480));
+
+      if (viewMode === 'attendee_pov' && selectedAttendee) {
+        // PRD §6 & §8.8: 1:1 square viewport letterboxed inside wider container
+        const squareSize = Math.max(200, Math.min(rawW, rawH) - 24);
+        canvas.style.width = `${squareSize}px`;
+        canvas.style.height = `${squareSize}px`;
+        canvas.style.borderRadius = '8px';
+        canvas.style.outline = '1px solid rgba(56, 189, 248, 0.45)';
+        canvas.style.outlineOffset = '-1px';
+        canvas.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.55)';
+        activeRenderer.setSize(squareSize, squareSize, false);
+
+        applyActiveViewerVisibility(
+          activeBuilt.scene,
+          snapshot,
+          'attendee_pov',
+          selectedAttendee.attendeeId,
+          activeBuilt.objectNodesById,
+          activeBuilt.attendeeProxyNodesById,
+        );
+        applyAttendeeCameraPose(
+          activeCamera,
+          snapshot,
+          selectedAttendee.attendeeId,
+        );
+      } else {
+        canvas.style.width = `${rawW}px`;
+        canvas.style.height = `${rawH}px`;
+        canvas.style.borderRadius = '0px';
+        canvas.style.outline = 'none';
+        canvas.style.boxShadow = 'none';
+        activeRenderer.setSize(rawW, rawH, false);
+
+        applyActiveViewerVisibility(
+          activeBuilt.scene,
+          snapshot,
+          'overview',
+          selectedAttendee?.attendeeId,
+          activeBuilt.objectNodesById,
+          activeBuilt.attendeeProxyNodesById,
+        );
+        applyOverviewCameraPose(
+          activeCamera,
+          snapshot,
+          rawW / rawH,
+          activePreset,
+        );
+
+        const orbit = orbitRef.current;
+        const sinP = Math.sin(orbit.polarRad);
+        const cosP = Math.cos(orbit.polarRad);
+        const cx =
+          orbit.target[0] + orbit.distanceM * sinP * Math.sin(orbit.azimuthRad);
+        const cy = orbit.target[1] + orbit.distanceM * cosP;
+        const cz =
+          orbit.target[2] + orbit.distanceM * sinP * Math.cos(orbit.azimuthRad);
+        activeCamera.position.set(cx, cy, cz);
+        activeCamera.lookAt(orbit.target[0], orbit.target[1], orbit.target[2]);
+        activeCamera.updateMatrixWorld(true);
+      }
+
+      activeRenderer.render(activeBuilt.scene, activeCamera);
+    };
+
+    renderFnRef.current = renderCurrentState;
+    renderCurrentState();
   }, [
     snapshot,
-    selectedAttendee?.attendeeId,
+    selectedAttendee,
     viewMode,
     showRoutes,
     showTargetGrid,
     highlightedObjectIds,
     activePreset,
-    onSelectAttendee,
   ]);
+
+  const activeProfileMeta = selectedAttendee
+    ? PROFILE_BADGE_META[selectedAttendee.profileId]
+    : null;
 
   return (
     <div
@@ -325,8 +474,10 @@ export function VenueViewport({
         height: '100%',
         minHeight: '420px',
         background: '#090d16',
-        borderRadius: '10px',
-        border: '1px solid #1e293b',
+        borderRadius: '12px',
+        border: '1px solid rgba(255, 255, 255, 0.09)',
+        boxShadow:
+          '0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.32)',
         overflow: 'hidden',
         display: 'flex',
         alignItems: 'center',
@@ -334,21 +485,21 @@ export function VenueViewport({
         ...style,
       }}
     >
-      <canvas
-        ref={canvasRef}
+      <style>{VIEWPORT_INLINE_CSS}</style>
+      <div
+        ref={canvasHostRef}
         style={{
-          display: webglAvailable ? 'block' : 'none',
+          display: webglAvailable ? 'flex' : 'none',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          height: '100%',
           cursor:
             viewMode === 'overview'
               ? hoveredAttendeeId
                 ? 'pointer'
                 : 'grab'
               : 'default',
-          borderRadius: viewMode === 'attendee_pov' ? '8px' : '0px',
-          boxShadow:
-            viewMode === 'attendee_pov'
-              ? '0 0 0 2px rgba(56, 189, 248, 0.45)'
-              : 'none',
         }}
       />
 
@@ -371,7 +522,7 @@ export function VenueViewport({
         </div>
       )}
 
-      {/* Top-Left HUD Badge */}
+      {/* Top-Left HUD Card (Concentric Radius: outer 8px, inner badge 4px) */}
       <div
         style={{
           position: 'absolute',
@@ -379,24 +530,49 @@ export function VenueViewport({
           left: '12px',
           padding: '8px 12px',
           borderRadius: '8px',
-          background: 'rgba(15, 23, 42, 0.86)',
-          border: '1px solid rgba(148, 163, 184, 0.22)',
+          background: 'rgba(15, 23, 42, 0.88)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          boxShadow:
+            '0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)',
           color: '#f8fafc',
           fontSize: '0.78rem',
           pointerEvents: 'none',
-          lineHeight: 1.4,
+          lineHeight: 1.45,
         }}
       >
-        {viewMode === 'attendee_pov' && selectedAttendee && activeAttendeePose ? (
+        {viewMode === 'attendee_pov' &&
+        selectedAttendee &&
+        activeAttendeePose ? (
           <>
-            <div style={{ fontWeight: 600, color: '#38bdf8' }}>
-              Attendee POV (90° × 90° Square 1:1)
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 600,
+                color: '#38bdf8',
+              }}
+            >
+              <span>Attendee POV · 90° × 90° (1:1 Square)</span>
+              {activeProfileMeta && (
+                <span
+                  style={{
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    fontSize: '0.68rem',
+                    color: activeProfileMeta.color,
+                    background: activeProfileMeta.bg,
+                  }}
+                >
+                  {activeProfileMeta.label}
+                </span>
+              )}
             </div>
             <div>
               {selectedAttendee.label} · Place{' '}
               <code>{activeAttendeePose.placeId}</code>
             </div>
-            <div style={{ color: '#94a3b8' }}>
+            <div style={{ color: '#94a3b8', fontSize: '0.73rem' }}>
               Eye World:{' '}
               <code>
                 [
@@ -405,16 +581,16 @@ export function VenueViewport({
                   .join(', ')}
                 ] m
               </code>{' '}
-              (own chair &amp; proxy excluded)
+              · Own chair &amp; proxy excluded
             </div>
           </>
         ) : (
           <>
-            <div style={{ fontWeight: 600, color: '#e2e8f0' }}>
+            <div style={{ fontWeight: 600, color: '#f1f5f9' }}>
               Interactive Room Overview ({snapshot.places.length} places)
             </div>
-            <div style={{ color: '#94a3b8' }}>
-              Drag to orbit · Scroll to zoom · Click any seat to select attendee
+            <div style={{ color: '#94a3b8', fontSize: '0.74rem' }}>
+              Drag to orbit · Scroll to zoom · Click any seat to inspect attendee
             </div>
           </>
         )}
@@ -427,8 +603,12 @@ export function VenueViewport({
             position: 'absolute',
             top: '12px',
             right: '12px',
+            padding: '3px',
+            borderRadius: '8px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
             display: 'flex',
-            gap: '6px',
+            gap: '4px',
           }}
         >
           {(
@@ -441,26 +621,100 @@ export function VenueViewport({
             <button
               key={item.id}
               type="button"
-              onClick={() => setActivePreset(item.id)}
-              style={{
-                padding: '5px 10px',
-                fontSize: '0.74rem',
-                borderRadius: '6px',
-                border:
-                  activePreset === item.id
-                    ? '1px solid #38bdf8'
-                    : '1px solid #334155',
-                background:
-                  activePreset === item.id
-                    ? 'rgba(30, 58, 138, 0.85)'
-                    : 'rgba(15, 23, 42, 0.82)',
-                color: '#f1f5f9',
-                cursor: 'pointer',
-              }}
+              className="vp-preset-btn"
+              data-active={activePreset === item.id ? 'true' : 'false'}
+              onClick={() => handleSelectPreset(item.id)}
             >
               {item.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Bottom-Left Overview Visual Legend */}
+      {viewMode === 'overview' && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            left: '12px',
+            padding: '6px 10px',
+            borderRadius: '8px',
+            background: 'rgba(15, 23, 42, 0.86)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '10px',
+            fontSize: '0.71rem',
+            color: '#cbd5e1',
+            pointerEvents: 'none',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: '#d97706',
+              }}
+            />
+            Movable Prop
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: '#38bdf8',
+              }}
+            />
+            Shorter Viewer
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: '#fbbf24',
+              }}
+            />
+            Extra-Legroom
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: '#a78bfa',
+              }}
+            />
+            Wheelchair Bay
+          </span>
+        </div>
+      )}
+
+      {/* Bottom-Right Hover Attendee Pill */}
+      {viewMode === 'overview' && hoveredAttendee && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            right: '12px',
+            padding: '6px 10px',
+            borderRadius: '8px',
+            background: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid rgba(56, 189, 248, 0.45)',
+            color: '#f8fafc',
+            fontSize: '0.74rem',
+            pointerEvents: 'none',
+          }}
+        >
+          <strong>{hoveredAttendee.label}</strong> ·{' '}
+          <code>{hoveredAttendee.assignedPlaceId}</code> (Click to select)
         </div>
       )}
     </div>
