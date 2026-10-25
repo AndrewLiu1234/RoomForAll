@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   INSPECTION_CAMERA,
   getAttendeeCameraPose,
   type Evaluation,
-  type SceneSnapshot,
 } from '../shared/index.js';
 import type { VenueViewportProps } from '../scene/index.js';
 import { populateThreeSceneFromSnapshot } from './evidenceCaptureBridge.js';
@@ -15,6 +14,22 @@ export interface InteractiveViewportStageProps extends VenueViewportProps {
   showSightlineOverlays: boolean;
   onToggleViewMode: (mode: 'overview' | 'attendee_pov') => void;
   onToggleSightlineOverlays: () => void;
+}
+
+function formatShortSeat(placeId: string, fallbackLabel?: string): string {
+  if (fallbackLabel) {
+    const match = fallbackLabel.match(/\b(R\d+-C\d+|R\d+-\d+|W-?\d+|Bay\s*\d+)\b/i);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+  return placeId
+    .replace(/^place_/, '')
+    .replace(/_/g, '-')
+    .toUpperCase();
+}
+
+function cleanGuestName(rawLabel: string): string {
+  const idx = rawLabel.indexOf('(');
+  return idx > 0 ? rawLabel.slice(0, idx).trim() : rawLabel.trim();
 }
 
 export function VenueViewportStage({
@@ -28,6 +43,11 @@ export function VenueViewportStage({
   onToggleSightlineOverlays,
 }: InteractiveViewportStageProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const defaultDistance = snapshot.places.length > 8 ? 10.6 : 7.2;
+
   const [orbitAngles, setOrbitAngles] = useState<{
     azimuthRad: number;
     polarRad: number;
@@ -35,16 +55,20 @@ export function VenueViewportStage({
   }>(() => ({
     azimuthRad: 0.38,
     polarRad: 0.92,
-    distanceM: snapshot.places.length > 8 ? 10.8 : 7.4,
+    distanceM: defaultDistance,
   }));
+
+  const orbitAnglesRef = useRef(orbitAngles);
+  orbitAnglesRef.current = orbitAngles;
 
   useEffect(() => {
     setOrbitAngles({
       azimuthRad: 0.38,
       polarRad: 0.92,
-      distanceM: snapshot.places.length > 8 ? 10.8 : 7.4,
+      distanceM: snapshot.places.length > 8 ? 10.6 : 7.2,
     });
-  }, [snapshot.sceneId]);
+  }, [snapshot.sceneId, snapshot.places.length]);
+
   const dragStateRef = useRef<{
     dragging: boolean;
     lastX: number;
@@ -61,6 +85,46 @@ export function VenueViewportStage({
   const selectedEval = selectedAttendeeId
     ? evaluation.attendees[selectedAttendeeId]
     : undefined;
+  const selectedProfile = selectedAttendee
+    ? snapshot.profiles[selectedAttendee.profileId]
+    : undefined;
+  const selectedPlace = selectedAttendee
+    ? snapshot.places.find((p) => p.id === selectedAttendee.assignedPlaceId)
+    : undefined;
+
+  const obstructedAttendees = useMemo(
+    () =>
+      snapshot.roster.filter(
+        (m) => evaluation.attendees[m.attendeeId]?.clearAndUsable === false,
+      ),
+    [snapshot.roster, evaluation.attendees],
+  );
+
+  const stepAttendee = (delta: number): void => {
+    if (!onSelectAttendee || snapshot.roster.length === 0) return;
+    const currentIdx = snapshot.roster.findIndex(
+      (a) => a.attendeeId === selectedAttendeeId,
+    );
+    const nextIdx =
+      (Math.max(0, currentIdx) + delta + snapshot.roster.length) %
+      snapshot.roster.length;
+    const nextMember = snapshot.roster[nextIdx];
+    if (nextMember) {
+      onSelectAttendee(nextMember.attendeeId);
+    }
+  };
+
+  const jumpToNextIssue = (): void => {
+    if (!onSelectAttendee || obstructedAttendees.length === 0) return;
+    const idx = obstructedAttendees.findIndex(
+      (a) => a.attendeeId === selectedAttendeeId,
+    );
+    const nextIssue =
+      obstructedAttendees[(idx + 1) % obstructedAttendees.length];
+    if (nextIssue) {
+      onSelectAttendee(nextIssue.attendeeId);
+    }
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -96,7 +160,11 @@ export function VenueViewportStage({
             ([x, z]) => new THREE.Vector3(x, 0.03, z),
           );
           const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
-          const lineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8 });
+          const lineMat = new THREE.LineBasicMaterial({
+            color: 0x38bdf8,
+            transparent: true,
+            opacity: 0.45,
+          });
           scene.add(new THREE.Line(lineGeo, lineMat));
         }
       }
@@ -118,13 +186,15 @@ export function VenueViewportStage({
 
         // Selection / status ring on floor under seat/bay
         const ringGeo = new THREE.RingGeometry(
-          isSelected ? 0.42 : 0.36,
-          isSelected ? 0.52 : 0.43,
-          28,
+          isSelected ? 0.44 : 0.36,
+          isSelected ? 0.54 : 0.43,
+          32,
         );
         const ringMat = new THREE.MeshBasicMaterial({
           color: isSelected ? 0x60a5fa : ringColor,
           side: THREE.DoubleSide,
+          transparent: true,
+          opacity: isSelected ? 0.95 : 0.72,
         });
         const ringMesh = new THREE.Mesh(ringGeo, ringMat);
         ringMesh.rotation.x = -Math.PI / 2;
@@ -151,6 +221,8 @@ export function VenueViewportStage({
         const appGeo = new THREE.BufferGeometry().setFromPoints(approachPts);
         const appMat = new THREE.LineBasicMaterial({
           color: attEval?.routeStatus === 'blocked' ? 0xef4444 : 0x22c55e,
+          transparent: true,
+          opacity: 0.4,
         });
         scene.add(new THREE.Line(appGeo, appMat));
       }
@@ -202,7 +274,7 @@ export function VenueViewportStage({
       );
       const pose = getAttendeeCameraPose(snapshot, selectedAttendeeId);
 
-      const dotGeo = new THREE.SphereGeometry(0.032, 8, 8);
+      const dotGeo = new THREE.SphereGeometry(0.03, 8, 8);
       const clearMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
       const blockedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
 
@@ -235,7 +307,7 @@ export function VenueViewportStage({
           const rayMat = new THREE.LineBasicMaterial({
             color: isClear ? 0x10b981 : 0xef4444,
             transparent: true,
-            opacity: isClear ? 0.35 : 0.65,
+            opacity: isClear ? 0.32 : 0.65,
           });
           scene.add(new THREE.Line(rayGeo, rayMat));
         }
@@ -273,24 +345,30 @@ export function VenueViewportStage({
         // Fallback if attendee missing
       }
     } else {
+      const currentOrbit = orbitAnglesRef.current;
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, width, height);
       const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
       const cx =
         targetPivot.x +
-        orbitAngles.distanceM *
-          Math.sin(orbitAngles.polarRad) *
-          Math.sin(orbitAngles.azimuthRad);
+        currentOrbit.distanceM *
+          Math.sin(currentOrbit.polarRad) *
+          Math.sin(currentOrbit.azimuthRad);
       const cy =
-        targetPivot.y + orbitAngles.distanceM * Math.cos(orbitAngles.polarRad);
+        targetPivot.y +
+        currentOrbit.distanceM * Math.cos(currentOrbit.polarRad);
       const cz =
         targetPivot.z +
-        orbitAngles.distanceM *
-          Math.sin(orbitAngles.polarRad) *
-          Math.cos(orbitAngles.azimuthRad);
+        currentOrbit.distanceM *
+          Math.sin(currentOrbit.polarRad) *
+          Math.cos(currentOrbit.azimuthRad);
       camera.position.set(cx, cy, cz);
       camera.lookAt(targetPivot);
     }
+
+    rendererRef.current = renderer;
+    sceneRef.current = scene;
+    cameraRef.current = camera;
 
     renderer.render(scene, camera);
 
@@ -316,6 +394,9 @@ export function VenueViewportStage({
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
       renderer.dispose();
     };
   }, [
@@ -324,8 +405,40 @@ export function VenueViewportStage({
     viewMode,
     evaluation,
     showSightlineOverlays,
-    orbitAngles,
   ]);
+
+  // Lightweight camera orbit update without recreating WebGLRenderer or Three.js scene
+  useEffect(() => {
+    if (viewMode !== 'overview') return;
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !scene || !camera) return;
+
+    const targetPivot = new THREE.Vector3(0, 0.7, -1.6);
+    const cx =
+      targetPivot.x +
+      orbitAngles.distanceM *
+        Math.sin(orbitAngles.polarRad) *
+        Math.sin(orbitAngles.azimuthRad);
+    const cy =
+      targetPivot.y + orbitAngles.distanceM * Math.cos(orbitAngles.polarRad);
+    const cz =
+      targetPivot.z +
+      orbitAngles.distanceM *
+        Math.sin(orbitAngles.polarRad) *
+        Math.cos(orbitAngles.azimuthRad);
+    camera.position.set(cx, cy, cz);
+    camera.lookAt(targetPivot);
+    renderer.render(scene, camera);
+  }, [orbitAngles, viewMode]);
+
+  const visPct = selectedEval
+    ? Math.round(selectedEval.sampledVisibility * 100)
+    : 100;
+  const seatBadge = selectedAttendee
+    ? formatShortSeat(selectedAttendee.assignedPlaceId, selectedPlace?.label)
+    : '';
 
   return (
     <div
@@ -333,19 +446,20 @@ export function VenueViewportStage({
         position: 'relative',
         width: '100%',
         height: '100%',
-        minHeight: '480px',
-        background: '#090c12',
+        minHeight: '500px',
+        background: 'var(--bg-canvas)',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
-      {/* Top Viewport Overlay Controls */}
+      {/* Top Floating Viewport Bar */}
       <div
         style={{
           position: 'absolute',
           top: '14px',
-          left: '14px',
-          right: '14px',
+          left: '16px',
+          right: '16px',
           zIndex: 10,
           display: 'flex',
           flexWrap: 'wrap',
@@ -355,67 +469,176 @@ export function VenueViewportStage({
           pointerEvents: 'none',
         }}
       >
+        {/* Left: Camera Mode Switcher + Ray Overlay Toggle */}
         <div
+          className="vp-hud-bar"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '5px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
+            padding: '4px',
           }}
         >
+          <div className="vp-segmented" style={{ border: 'none', background: 'transparent', padding: 0 }}>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                viewMode === 'overview' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => onToggleViewMode('overview')}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" x2="12" y1="22.08" y2="12" />
+              </svg>
+              <span>Room Orbit</span>
+            </button>
+
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
+                viewMode === 'attendee_pov' ? 'vp-segment-btn-active' : ''
+              }`}
+              onClick={() => onToggleViewMode('attendee_pov')}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>Seat POV</span>
+            </button>
+          </div>
+
+          <div className="vp-divider-v" />
+
           <button
             type="button"
-            className={`vp-btn ${viewMode === 'overview' ? 'vp-btn-primary' : ''}`}
-            onClick={() => onToggleViewMode('overview')}
+            aria-pressed={showSightlineOverlays}
+            className="vp-segment-btn vp-focusable"
+            style={{
+              color: showSightlineOverlays
+                ? 'var(--text-primary)'
+                : 'var(--text-secondary)',
+            }}
+            onClick={onToggleSightlineOverlays}
           >
-            Room Overview (3D Orbit)
-          </button>
-          <button
-            type="button"
-            className={`vp-btn ${viewMode === 'attendee_pov' ? 'vp-btn-primary' : ''}`}
-            onClick={() => onToggleViewMode('attendee_pov')}
-          >
-            Attendee POV (90°×90° Square)
+            <span
+              className="vp-status-dot"
+              style={{
+                background: showSightlineOverlays
+                  ? 'var(--status-pass)'
+                  : 'var(--text-muted)',
+              }}
+            />
+            <span>Sightline Rays</span>
           </button>
         </div>
 
+        {/* Right: Quick Camera Presets / Next Issue Jump */}
         <div
+          className="vp-hud-bar"
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '5px 10px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
+            gap: '4px',
+            padding: '4px',
           }}
         >
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.78rem',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showSightlineOverlays}
-              onChange={onToggleSightlineOverlays}
-            />
-            Show 15×9 Target Grid &amp; Rays
-          </label>
+          {viewMode === 'overview' && (
+            <>
+              <button
+                type="button"
+                className="vp-segment-btn vp-focusable"
+                onClick={() =>
+                  setOrbitAngles({
+                    azimuthRad: 0.38,
+                    polarRad: 0.92,
+                    distanceM: defaultDistance,
+                  })
+                }
+              >
+                Stage Oblique
+              </button>
+              <button
+                type="button"
+                className="vp-segment-btn vp-focusable"
+                onClick={() =>
+                  setOrbitAngles({
+                    azimuthRad: 0,
+                    polarRad: 0.28,
+                    distanceM: defaultDistance * 1.05,
+                  })
+                }
+              >
+                Top Plan
+              </button>
+            </>
+          )}
+
+          {obstructedAttendees.length > 0 && (
+            <button
+              type="button"
+              className="vp-segment-btn vp-focusable"
+              style={{
+                color: 'var(--status-fail-text)',
+                background: 'var(--status-fail-bg)',
+              }}
+              onClick={jumpToNextIssue}
+            >
+              <span className="vp-status-dot vp-status-dot-fail" />
+              <span>
+                Next Issue ({obstructedAttendees.length})
+              </span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 1:1 Optical Viewfinder Badge when in Seat POV */}
+      {viewMode === 'attendee_pov' && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '64px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 8,
+            pointerEvents: 'none',
+          }}
+        >
+          <span
+            className="vp-badge vp-badge-neutral mono"
+            style={{
+              background: 'rgba(12, 15, 23, 0.78)',
+              borderColor: 'var(--border-subtle)',
+              padding: '3px 10px',
+            }}
+          >
+            90°×90° Optical Frame · 15×9 Target Grid
+          </span>
+        </div>
+      )}
 
       {/* Interactive 3D Canvas Container */}
       <div
@@ -463,133 +686,156 @@ export function VenueViewportStage({
           flex: 1,
           width: '100%',
           height: '100%',
-          cursor: viewMode === 'overview' ? 'grab' : 'crosshair',
+          cursor: viewMode === 'overview' ? 'grab' : 'default',
         }}
       />
 
-      {/* Quick Seat/Bay Switcher Pill Bar & Selected Attendee HUD */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '14px',
-          left: '14px',
-          right: '14px',
-          zIndex: 10,
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          pointerEvents: 'none',
-        }}
-      >
+      {/* Sleek Bottom-Center Floating Guest Dock */}
+      {selectedAttendee && selectedEval && (
         <div
           style={{
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '10px 14px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
+            position: 'absolute',
+            bottom: '16px',
+            left: '16px',
+            right: '16px',
+            zIndex: 10,
             display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: '14px',
+            justifyContent: 'center',
+            pointerEvents: 'none',
           }}
         >
-          <div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-              Active Camera / Place
-            </div>
-            <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-              {selectedAttendee
-                ? `${selectedAttendee.label} · ${selectedAttendee.assignedPlaceId}`
-                : 'Select an attendee'}
-            </div>
-          </div>
-
-          {selectedEval && (
-            <>
-              <div>
-                <div
-                  style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}
-                >
-                  Sampled Visibility (15×9)
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span className="mono" style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                    {selectedEval.visibleSamples}/{selectedEval.totalSamples} (
-                    {Math.round(selectedEval.sampledVisibility * 100)}%)
-                  </span>
-                  <span
-                    className={`vp-badge ${
-                      selectedEval.isViewClear ? 'vp-badge-pass' : 'vp-badge-fail'
-                    }`}
-                  >
-                    {selectedEval.isViewClear ? 'Clear >=122' : 'Obstructed'}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <div
-                  style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}
-                >
-                  Eye World Pos [X, Y, Z]
-                </div>
-                <div className="mono" style={{ fontSize: '0.8rem' }}>
-                  [
-                  {selectedEval.eyePositionWorld
-                    .map((v) => `${v.toFixed(2)}m`)
-                    .join(', ')}
-                  ]
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Fast camera jump pills */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '6px',
-            background: 'var(--bg-glass)',
-            backdropFilter: 'blur(8px)',
-            padding: '6px',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--border-subtle)',
-            pointerEvents: 'auto',
-          }}
-        >
-          {snapshot.roster.map((m) => {
-            const active = m.attendeeId === selectedAttendeeId;
-            const ev = evaluation.attendees[m.attendeeId];
-            return (
+          <div
+            className="vp-hud-bar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '8px 12px',
+              maxWidth: '680px',
+            }}
+          >
+            {/* Prev / Next Guest Stepper */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <button
-                key={m.attendeeId}
                 type="button"
-                className={`vp-btn ${active ? 'vp-btn-primary' : ''}`}
-                style={{ padding: '5px 10px', fontSize: '0.75rem' }}
-                onClick={() => onSelectAttendee?.(m.attendeeId)}
+                aria-label="Previous guest"
+                className="vp-btn"
+                style={{ padding: '5px 8px' }}
+                onClick={() => stepAttendee(-1)}
               >
-                <span>{m.assignedPlaceId.replace('place_', '')}</span>
-                {ev && (
-                  <span
-                    style={{
-                      width: '7px',
-                      height: '7px',
-                      borderRadius: '50%',
-                      background: ev.clearAndUsable ? '#34d399' : '#f87171',
-                    }}
-                  />
-                )}
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
               </button>
-            );
-          })}
+              <button
+                type="button"
+                aria-label="Next guest"
+                className="vp-btn"
+                style={{ padding: '5px 8px' }}
+                onClick={() => stepAttendee(1)}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="vp-divider-v" />
+
+            {/* Selected Guest Identity */}
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  fontWeight: 600,
+                  fontSize: '0.83rem',
+                }}
+              >
+                <span>{cleanGuestName(selectedAttendee.label)}</span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: '0.71rem',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {seatBadge}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                {selectedProfile?.label ?? selectedAttendee.profileId}
+              </div>
+            </div>
+
+            <div className="vp-divider-v" />
+
+            {/* Sightline Status Pill */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span
+                className={`vp-badge ${
+                  selectedEval.clearAndUsable ? 'vp-badge-pass' : 'vp-badge-fail'
+                }`}
+              >
+                <span
+                  className={`vp-status-dot ${
+                    selectedEval.clearAndUsable
+                      ? 'vp-status-dot-pass'
+                      : 'vp-status-dot-fail'
+                  }`}
+                />
+                <span>
+                  {visPct}% Sightline ({selectedEval.visibleSamples}/
+                  {selectedEval.totalSamples})
+                </span>
+              </span>
+            </div>
+
+            <div className="vp-divider-v" />
+
+            {/* 1-Click Toggle between Seat POV and Room Orbit */}
+            <button
+              type="button"
+              className={`vp-btn ${
+                viewMode === 'attendee_pov' ? 'vp-btn-primary' : ''
+              }`}
+              style={{ padding: '5px 10px', fontSize: '0.75rem' }}
+              onClick={() =>
+                onToggleViewMode(
+                  viewMode === 'attendee_pov' ? 'overview' : 'attendee_pov',
+                )
+              }
+            >
+              {viewMode === 'attendee_pov' ? 'Back to Orbit' : 'Inspect POV'}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
