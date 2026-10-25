@@ -288,6 +288,14 @@ export function createLocalFixtureRepairPreviewRun(
         reason:
           'Clear central sightline corridor between Row 1 chairs for shorter seated viewer at Seat R2-1 within 0.60m single-op limit.',
       },
+      {
+        targetType: 'object',
+        targetId: 'obj_chair_r2_c1',
+        deltaPositionM: [0, 0.10, 0],
+        deltaYawDeg: 0,
+        reason:
+          'Elevate Row 2 chair by 0.10m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant ramp slope.',
+      },
     ],
   };
 

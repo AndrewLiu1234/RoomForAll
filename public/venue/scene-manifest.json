@@ -7,7 +7,7 @@
     "license": "CC0-1.0",
     "sourceUrl": "https://3dassets.dev/packs/village-hall-and-community-events",
     "assetPath": "/venue/prepared-venue.glb",
-    "assetHash": "vp_667259a79861efe9",
+    "assetHash": "vp_d8a8f02bff7e5310",
     "isFallbackFixture": true,
     "preparationNotes": "Prepared single-level 24-place community lecture hall (22 chairs + 2 wheelchair bays) with deterministic glTF 2.0 binary asset and collision/occlusion proxy manifest. Village Hall CDN returned HTTP 403 during automated preparation check; generated clean CC0 architectural GLB fixture per PRD §3 fallback protocol."
   },
@@ -321,7 +321,7 @@
       "label": "Row 1 Seat 1",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r1_west",
+      "groupId": "group_row_1",
       "transform": {
         "position": [
           -1.95,
@@ -369,7 +369,7 @@
       "label": "Row 1 Seat 2",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r1_west",
+      "groupId": "group_row_1",
       "transform": {
         "position": [
           -1.15,
@@ -417,7 +417,7 @@
       "label": "Row 1 Seat 3",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r1_center",
+      "groupId": "group_row_1",
       "transform": {
         "position": [
           0,
@@ -465,7 +465,7 @@
       "label": "Row 1 Seat 4",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r1_east",
+      "groupId": "group_row_1",
       "transform": {
         "position": [
           1.15,
@@ -513,7 +513,7 @@
       "label": "Row 1 Seat 5",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r1_east",
+      "groupId": "group_row_1",
       "transform": {
         "position": [
           1.95,
@@ -561,7 +561,7 @@
       "label": "Row 2 Seat 1",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r2_west",
+      "groupId": "group_row_2",
       "transform": {
         "position": [
           -2.35,
@@ -609,7 +609,7 @@
       "label": "Row 2 Seat 2",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r2_west",
+      "groupId": "group_row_2",
       "transform": {
         "position": [
           -1.55,
@@ -657,7 +657,7 @@
       "label": "Row 2 Seat 3",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r2_west",
+      "groupId": "group_row_2",
       "transform": {
         "position": [
           -0.55,
@@ -705,7 +705,7 @@
       "label": "Row 2 Seat 4",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r2_east",
+      "groupId": "group_row_2",
       "transform": {
         "position": [
           0.55,
@@ -753,7 +753,7 @@
       "label": "Row 2 Seat 5",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r2_east",
+      "groupId": "group_row_2",
       "transform": {
         "position": [
           1.55,
@@ -801,7 +801,7 @@
       "label": "Row 2 Seat 6",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r2_east",
+      "groupId": "group_row_2",
       "transform": {
         "position": [
           2.35,
@@ -849,7 +849,7 @@
       "label": "Row 3 Seat 1",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r3_west",
+      "groupId": "group_row_3",
       "transform": {
         "position": [
           -2.75,
@@ -897,7 +897,7 @@
       "label": "Row 3 Seat 2",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r3_west",
+      "groupId": "group_row_3",
       "transform": {
         "position": [
           -1.95,
@@ -945,7 +945,7 @@
       "label": "Row 3 Seat 3",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r3_west",
+      "groupId": "group_row_3",
       "transform": {
         "position": [
           -0.95,
@@ -993,7 +993,7 @@
       "label": "Row 3 Seat 4",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r3_east",
+      "groupId": "group_row_3",
       "transform": {
         "position": [
           0.95,
@@ -1041,7 +1041,7 @@
       "label": "Row 3 Seat 5",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r3_east",
+      "groupId": "group_row_3",
       "transform": {
         "position": [
           1.95,
@@ -1089,7 +1089,7 @@
       "label": "Row 3 Seat 6",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r3_east",
+      "groupId": "group_row_3",
       "transform": {
         "position": [
           2.75,
@@ -1137,7 +1137,7 @@
       "label": "Row 4 Seat 1",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r4_center",
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           -1.6,
@@ -1185,7 +1185,7 @@
       "label": "Row 4 Seat 2",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r4_center",
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           -0.8,
@@ -1233,7 +1233,7 @@
       "label": "Row 4 Seat 3",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r4_center",
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           0,
@@ -1281,7 +1281,7 @@
       "label": "Row 4 Seat 4",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r4_center",
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           0.8,
@@ -1329,7 +1329,7 @@
       "label": "Row 4 Seat 5",
       "category": "movable_chair",
       "editable": true,
-      "groupId": "group_r4_center",
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           1.6,
@@ -1376,7 +1376,8 @@
       "id": "obj_bay_wc_01",
       "label": "West Accessible Wheelchair Bay W1",
       "category": "wheelchair_bay_frame",
-      "editable": false,
+      "editable": true,
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           -3,
@@ -1392,6 +1393,12 @@
           3.3
         ],
         "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.6,
+        "maxZ": 4.4
       },
       "proxies": []
     },
@@ -1399,7 +1406,8 @@
       "id": "obj_bay_wc_02",
       "label": "East Accessible Wheelchair Bay W2",
       "category": "wheelchair_bay_frame",
-      "editable": false,
+      "editable": true,
+      "groupId": "group_row_4",
       "transform": {
         "position": [
           3,
@@ -1415,80 +1423,30 @@
           3.3
         ],
         "yawDeg": 0
+      },
+      "allowedBounds": {
+        "minX": -3.8,
+        "maxX": 3.8,
+        "minZ": -2.6,
+        "maxZ": 4.4
       },
       "proxies": []
     }
   ],
   "chairGroups": [
     {
-      "id": "group_r1_west",
-      "label": "Row 1 West Pair",
+      "id": "group_row_1",
+      "label": "Row 1 Seating Tier",
       "memberObjectIds": [
         "obj_chair_r1_c1",
-        "obj_chair_r1_c2"
-      ],
-      "transform": {
-        "position": [
-          -1.55,
-          0,
-          -2
-        ],
-        "yawDeg": 0
-      },
-      "baselineTransform": {
-        "position": [
-          -1.55,
-          0,
-          -2
-        ],
-        "yawDeg": 0
-      },
-      "allowedBounds": {
-        "minX": -3.8,
-        "maxX": 3.8,
-        "minZ": -2.6,
-        "maxZ": 4.4
-      }
-    },
-    {
-      "id": "group_r1_center",
-      "label": "Row 1 Center Seat",
-      "memberObjectIds": [
-        "obj_chair_r1_c3"
-      ],
-      "transform": {
-        "position": [
-          0,
-          0,
-          -2
-        ],
-        "yawDeg": 0
-      },
-      "baselineTransform": {
-        "position": [
-          0,
-          0,
-          -2
-        ],
-        "yawDeg": 0
-      },
-      "allowedBounds": {
-        "minX": -3.8,
-        "maxX": 3.8,
-        "minZ": -2.6,
-        "maxZ": 4.4
-      }
-    },
-    {
-      "id": "group_r1_east",
-      "label": "Row 1 East Extra-Legroom Pair",
-      "memberObjectIds": [
+        "obj_chair_r1_c2",
+        "obj_chair_r1_c3",
         "obj_chair_r1_c4",
         "obj_chair_r1_c5"
       ],
       "transform": {
         "position": [
-          1.55,
+          0,
           0,
           -2
         ],
@@ -1496,7 +1454,7 @@
       },
       "baselineTransform": {
         "position": [
-          1.55,
+          0,
           0,
           -2
         ],
@@ -1510,47 +1468,19 @@
       }
     },
     {
-      "id": "group_r2_west",
-      "label": "Row 2 West Block",
+      "id": "group_row_2",
+      "label": "Row 2 Seating Tier",
       "memberObjectIds": [
         "obj_chair_r2_c1",
         "obj_chair_r2_c2",
-        "obj_chair_r2_c3"
-      ],
-      "transform": {
-        "position": [
-          -1.483,
-          0,
-          -0.3
-        ],
-        "yawDeg": 0
-      },
-      "baselineTransform": {
-        "position": [
-          -1.483,
-          0,
-          -0.3
-        ],
-        "yawDeg": 0
-      },
-      "allowedBounds": {
-        "minX": -3.8,
-        "maxX": 3.8,
-        "minZ": -2.6,
-        "maxZ": 4.4
-      }
-    },
-    {
-      "id": "group_r2_east",
-      "label": "Row 2 East Block",
-      "memberObjectIds": [
+        "obj_chair_r2_c3",
         "obj_chair_r2_c4",
         "obj_chair_r2_c5",
         "obj_chair_r2_c6"
       ],
       "transform": {
         "position": [
-          1.483,
+          0,
           0,
           -0.3
         ],
@@ -1558,7 +1488,7 @@
       },
       "baselineTransform": {
         "position": [
-          1.483,
+          0,
           0,
           -0.3
         ],
@@ -1572,47 +1502,19 @@
       }
     },
     {
-      "id": "group_r3_west",
-      "label": "Row 3 West Staggered Block",
+      "id": "group_row_3",
+      "label": "Row 3 Seating Tier",
       "memberObjectIds": [
         "obj_chair_r3_c1",
         "obj_chair_r3_c2",
-        "obj_chair_r3_c3"
-      ],
-      "transform": {
-        "position": [
-          -1.883,
-          0,
-          1.4
-        ],
-        "yawDeg": 0
-      },
-      "baselineTransform": {
-        "position": [
-          -1.883,
-          0,
-          1.4
-        ],
-        "yawDeg": 0
-      },
-      "allowedBounds": {
-        "minX": -3.8,
-        "maxX": 3.8,
-        "minZ": -2.6,
-        "maxZ": 4.4
-      }
-    },
-    {
-      "id": "group_r3_east",
-      "label": "Row 3 East Staggered Block",
-      "memberObjectIds": [
+        "obj_chair_r3_c3",
         "obj_chair_r3_c4",
         "obj_chair_r3_c5",
         "obj_chair_r3_c6"
       ],
       "transform": {
         "position": [
-          1.883,
+          0,
           0,
           1.4
         ],
@@ -1620,7 +1522,7 @@
       },
       "baselineTransform": {
         "position": [
-          1.883,
+          0,
           0,
           1.4
         ],
@@ -1634,14 +1536,16 @@
       }
     },
     {
-      "id": "group_r4_center",
-      "label": "Row 4 Center Block",
+      "id": "group_row_4",
+      "label": "Row 4 & Accessible Terrace Tier",
       "memberObjectIds": [
         "obj_chair_r4_c1",
         "obj_chair_r4_c2",
         "obj_chair_r4_c3",
         "obj_chair_r4_c4",
-        "obj_chair_r4_c5"
+        "obj_chair_r4_c5",
+        "obj_bay_wc_01",
+        "obj_bay_wc_02"
       ],
       "transform": {
         "position": [
@@ -2337,5 +2241,5 @@
       "assignedPlaceId": "place_bay_wc_01"
     }
   ],
-  "sceneHash": "vp_1bd88b936a68191b"
+  "sceneHash": "vp_1c414b29665b342a"
 }

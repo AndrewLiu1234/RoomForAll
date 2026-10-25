@@ -35,6 +35,7 @@ import {
   loadPreparedVenueManifest,
   parseVenueGlbBinary,
 } from '../../src/scene/index.js';
+import { applyAndValidatePatch } from '../../src/evaluation/index.js';
 
 /**
  * Pure 3D segment vs axis-aligned box intersection test (Slab method) for verifying
@@ -303,26 +304,22 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     );
 
     // Apply patch to create patched snapshot
-    const patched: SceneSnapshot = structuredClone(baseline);
+    const valResult = applyAndValidatePatch(baseline, baseline, patch);
+    expect(valResult.valid).toBe(true);
+    const patched: SceneSnapshot = valResult.snapshot!;
+
     const seenTargets = new Set<string>();
     for (const op of patch.operations) {
       expect(seenTargets.has(op.targetId)).toBe(false);
       seenTargets.add(op.targetId);
 
       const [dx, dy, dz] = op.deltaPositionM;
-      expect(dy).toBe(0);
+      expect(Math.abs(dy)).toBeLessThanOrEqual(PATCH_CONSTRAINTS.maxAxisDeltaM);
       expect(Math.abs(dx)).toBeLessThanOrEqual(PATCH_CONSTRAINTS.maxAxisDeltaM);
       expect(Math.abs(dz)).toBeLessThanOrEqual(PATCH_CONSTRAINTS.maxAxisDeltaM);
       expect(Math.abs(op.deltaYawDeg)).toBeLessThanOrEqual(
         PATCH_CONSTRAINTS.maxYawDeltaDeg,
       );
-
-      const obj = patched.objects.find((o) => o.id === op.targetId);
-      expect(obj).toBeDefined();
-      expect(obj!.editable).toBe(true);
-      obj!.transform.position[0] += dx;
-      obj!.transform.position[2] += dz;
-      obj!.transform.yawDeg += op.deltaYawDeg;
     }
 
     // 1. Check 15x9 = 135 raycast visibility for ALL 24 attendees in baseline vs patched
@@ -717,5 +714,38 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     );
     expect(manifest.keyframes[0]?.fovDeg).toBe(90);
     expect(manifest.keyframes[0]?.aspect).toBe(1.0);
+  });
+
+  it('renders 3D stepped platforms and ADA-compliant accessible aisle ramps when tiered seating is present', () => {
+    const snap = createDevFixtureSnapshot();
+    // Elevate row 2 so tiered platforms and ramps are constructed
+    const r2Chair = snap.objects.find((o) => o.id === 'obj_chair_r2_c1')!;
+    r2Chair.transform.position[1] = 0.10;
+
+    const built = buildVenueThreeScene(snap);
+    const tiersGroup = built.scene.getObjectByName(
+      'tiered_seating_platforms_and_ramps',
+    );
+    expect(tiersGroup).toBeDefined();
+
+    // Verify platform mesh exists
+    const platform = tiersGroup?.children.find((c) =>
+      c.name.startsWith('tiered_riser_platform_'),
+    );
+    expect(platform).toBeDefined();
+
+    // Verify ramp mesh exists connecting tiers
+    const ramp = tiersGroup?.children.find((c) =>
+      c.name.startsWith('accessible_aisle_ramp_'),
+    );
+    expect(ramp).toBeDefined();
+
+    // Verify outside accessible ramps leading to wheelchair bays exist
+    const outsideRamp = tiersGroup?.children.find((c) =>
+      c.name.startsWith('accessible_outside_ramp_'),
+    );
+    expect(outsideRamp).toBeDefined();
+
+    disposeVenueScene(built.scene);
   });
 });

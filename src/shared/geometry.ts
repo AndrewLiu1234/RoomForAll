@@ -170,7 +170,7 @@ export function getTargetSamplePointsWorld(target: PresentationTarget): Vec3[] {
 export function applyGroupDeltaToMemberTransform(
   memberTransform: Transform3D,
   groupOriginPosition: Vec3,
-  deltaPositionM: [number, 0, number],
+  deltaPositionM: [number, number, number],
   deltaYawDeg: number,
 ): Transform3D {
   const rad = (deltaYawDeg * Math.PI) / 180;
@@ -186,7 +186,7 @@ export function applyGroupDeltaToMemberTransform(
   return {
     position: [
       groupOriginPosition[0] + rotX + deltaPositionM[0],
-      memberTransform.position[1],
+      memberTransform.position[1] + (deltaPositionM[1] ?? 0),
       groupOriginPosition[2] + rotZ + deltaPositionM[2],
     ],
     yawDeg: memberTransform.yawDeg + deltaYawDeg,
@@ -226,6 +226,7 @@ export function createBlindCritiquePayload(
     routes: structuredClone(snapshot.routes),
     ...(snapshot.exits ? { exits: structuredClone(snapshot.exits) } : {}),
     target: structuredClone(snapshot.target),
+    roomBounds: structuredClone(snapshot.roomBounds),
     patchConstraints: PATCH_CONSTRAINTS,
   };
 }

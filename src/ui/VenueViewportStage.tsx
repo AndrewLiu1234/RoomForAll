@@ -213,6 +213,7 @@ export function VenueViewportStage({
             : 0xef4444;
 
         // Selection / status ring on floor under seat/bay
+        const chairElevation = Math.max(0.04, obj.transform.position[1]);
         const ringGeo = new THREE.RingGeometry(
           isSelected ? 0.44 : 0.36,
           isSelected ? 0.54 : 0.43,
@@ -228,7 +229,7 @@ export function VenueViewportStage({
         ringMesh.rotation.x = -Math.PI / 2;
         ringMesh.position.set(
           obj.transform.position[0],
-          0.02,
+          chairElevation + 0.005,
           obj.transform.position[2],
         );
         scene.add(ringMesh);
@@ -237,12 +238,12 @@ export function VenueViewportStage({
         const approachPts = [
           new THREE.Vector3(
             place.routeAnchorPoint[0],
-            0.025,
+            chairElevation + 0.01,
             place.routeAnchorPoint[1],
           ),
           new THREE.Vector3(
             obj.transform.position[0],
-            0.025,
+            chairElevation + 0.01,
             obj.transform.position[2],
           ),
         ];
