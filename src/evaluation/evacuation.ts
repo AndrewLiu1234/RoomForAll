@@ -446,11 +446,15 @@ function buildAgentEgressWaypoints(
         Math.hypot(b.position[0] - seatPos[0], b.position[1] - seatPos[1]),
     );
 
-    let firstBlockedFallback: {
+    let bestBlockedAttempt: {
       waypoints: Vec2[];
       targetExitId: string;
       blockerId?: string;
+      remainingDistToExit: number;
     } | null = null;
+
+    // Step 0.32m out of the chair into the clear row cross-aisle so the person never walks through neighboring chairs
+    const rowStepZ = Number((seatPos[1] - 0.32).toFixed(3));
 
     for (const exit of sortedByDist) {
       const exitY = exit.elevationM ?? 0;
@@ -466,9 +470,20 @@ function buildAgentEgressWaypoints(
           : exit.position[0] - 0.65;
 
       const candidateChains: Vec2[][] = [
-        ...(Math.abs(exit.position[1] - seatPos[1]) < 0.6
-          ? [[[exit.position[0], exit.position[1]] as Vec2]]
+        ...(Math.abs(exit.position[1] - seatPos[1]) < 0.65
+          ? [
+              [
+                [seatPos[0], exit.position[1]] as Vec2,
+                [exit.position[0], exit.position[1]] as Vec2,
+              ],
+              [[exit.position[0], exit.position[1]] as Vec2],
+            ]
           : []),
+        [
+          [seatPos[0], rowStepZ],
+          [Number(sideAisleX.toFixed(3)), rowStepZ],
+          [exit.position[0], exit.position[1]],
+        ],
         [
           [Number(sideAisleX.toFixed(3)), seatPos[1]],
           [exit.position[0], exit.position[1]],
@@ -502,28 +517,45 @@ function buildAgentEgressWaypoints(
           };
         }
 
-        if (!firstBlockedFallback) {
-          firstBlockedFallback = {
-            waypoints:
-              levelDiff > 0.95 && check.clear
-                ? [[Number(sideAisleX.toFixed(3)), seatPos[1]]]
-                : check.truncatedWaypoints,
+        // If blocked, compute how close this attempt gets the person to the nearest exit before stopping at the barrier
+        const stopWps =
+          levelDiff > 0.95 && check.clear
+            ? [
+                [seatPos[0], rowStepZ] as Vec2,
+                [Number(sideAisleX.toFixed(3)), rowStepZ] as Vec2,
+              ]
+            : check.truncatedWaypoints;
+        const lastPt = stopWps[stopWps.length - 1] ?? seatPos;
+        const remDist =
+          Math.hypot(
+            exit.position[0] - lastPt[0],
+            exit.position[1] - lastPt[1],
+          ) + (levelDiff > 0.95 ? levelDiff * 2.0 : 0);
+
+        if (
+          !bestBlockedAttempt ||
+          remDist < bestBlockedAttempt.remainingDistToExit
+        ) {
+          bestBlockedAttempt = {
+            waypoints: stopWps,
             targetExitId: exit.id,
             blockerId:
               levelDiff > 0.95
                 ? `isolated_level_drop_${seatY.toFixed(1)}m_to_${exitY.toFixed(1)}m`
                 : check.blockerId,
+            remainingDistToExit: remDist,
           };
         }
       }
     }
 
-    // No exit can be reached without phasing through a wall/parapet or jumping off a gallery!
+    // No exit can be reached without phasing through a wall/parapet or jumping off a gallery:
+    // navigate as close as physically possible to the nearest exit and stop!
     return {
-      waypoints: firstBlockedFallback?.waypoints ?? [[seatPos[0], seatPos[1]]],
-      targetExitId: firstBlockedFallback?.targetExitId ?? sortedByDist[0]!.id,
+      waypoints: bestBlockedAttempt?.waypoints ?? [[seatPos[0], seatPos[1]]],
+      targetExitId: bestBlockedAttempt?.targetExitId ?? sortedByDist[0]!.id,
       trappedByWall: true,
-      blockingWallId: firstBlockedFallback?.blockerId ?? 'wall_barrier',
+      blockingWallId: bestBlockedAttempt?.blockerId ?? 'wall_barrier',
     };
   }
 
@@ -689,12 +721,13 @@ export function synthesizeReachableExitsForSnapshot(
       continue;
     }
 
-    // Test both -X and +X directions along this seat's row and choose the direction with the cleanest unobstructed aisle space
+    // Place the new reachable exit in the clear row/aisle corridor (stepped 0.32m out into the row cross-aisle and laterally toward the nearest side aisle)
+    const aisleZ = Number((seatPos[1] - 0.32).toFixed(2));
     const candidateDirs: Array<-1 | 1> =
       seatPos[0] <= 0 ? [-1, 1] : [1, -1];
     let chosenExitPos: Vec2 = [
-      Number((seatPos[0] + 1.2).toFixed(2)),
-      Number(seatPos[1].toFixed(2)),
+      Number((seatPos[0] + 1.4).toFixed(2)),
+      aisleZ,
     ];
     let chosenDir: -1 | 1 = candidateDirs[0]!;
     let bestClearDist = -1;
@@ -702,12 +735,12 @@ export function synthesizeReachableExitsForSnapshot(
     for (const dSign of candidateDirs) {
       const targetX =
         dSign < 0
-          ? Math.max(snapshot.roomBounds.min[0] + 1.2, seatPos[0] - 1.8)
-          : Math.min(snapshot.roomBounds.max[0] - 1.2, seatPos[0] + 1.8);
+          ? Math.max(snapshot.roomBounds.min[0] + 1.2, seatPos[0] - 2.0)
+          : Math.min(snapshot.roomBounds.max[0] - 1.2, seatPos[0] + 2.0);
 
       const hit = findFirstWallHitOnSegment(
-        seatPos,
-        [targetX, seatPos[1]],
+        [seatPos[0], aisleZ],
+        [targetX, aisleZ],
         seatY,
         wallBlockers,
         place.objectId,
@@ -716,13 +749,13 @@ export function synthesizeReachableExitsForSnapshot(
       const candidatePt: Vec2 = hit.blocked
         ? [
             Number((hit.stopPoint[0] - dSign * 0.25).toFixed(2)),
-            Number(seatPos[1].toFixed(2)),
+            aisleZ,
           ]
-        : [Number(targetX.toFixed(2)), Number(seatPos[1].toFixed(2))];
+        : [Number(targetX.toFixed(2)), aisleZ];
 
-      const verify = findFirstWallHitOnSegment(
+      const verify = checkWaypointChainWallFree(
         seatPos,
-        candidatePt,
+        [[seatPos[0], aisleZ], candidatePt],
         seatY,
         wallBlockers,
         place.objectId,
@@ -731,7 +764,7 @@ export function synthesizeReachableExitsForSnapshot(
         candidatePt[0] - seatPos[0],
         candidatePt[1] - seatPos[1],
       );
-      if (!verify.blocked && dist > bestClearDist) {
+      if (verify.clear && dist > bestClearDist) {
         bestClearDist = dist;
         chosenExitPos = candidatePt;
         chosenDir = dSign;
@@ -741,18 +774,18 @@ export function synthesizeReachableExitsForSnapshot(
     const exitPos: Vec2 = chosenExitPos;
     const dirSign = chosenDir;
 
-    // Avoid duplicate exits within 1.5m on the same elevation tier
+    // Avoid duplicate exits within 2.2m on the same elevation tier so nearby people share the same reasonable aisle exit
     const alreadyExists = workingExits.some(
       (e) =>
         Math.hypot(e.position[0] - exitPos[0], e.position[1] - exitPos[1]) <
-          1.5 && Math.abs((e.elevationM ?? 0) - seatY) <= 0.85,
+          2.2 && Math.abs((e.elevationM ?? 0) - seatY) <= 0.85,
     );
     if (alreadyExists) continue;
 
     const exitIdx = addedExits.length + 1;
     const newPortal: VenueExitPortal = {
       id: `exit_repaired_${exitIdx}`,
-      label: `Repaired Emergency Exit ${exitIdx} (Tier Y=${seatY.toFixed(1)}m)`,
+      label: `Added Aisle Exit ${exitIdx} (Tier Y=${seatY.toFixed(1)}m)`,
       position: exitPos,
       elevationM: Number(seatY.toFixed(2)),
       widthM: 1.4,
@@ -1072,11 +1105,28 @@ export function simulateEvacuation(
       const vx = (steerX / steerLen) * targetSpeed;
       const vz = (steerZ / steerLen) * targetSpeed;
 
-      ag.velocity = [vx, vz];
-      ag.position = [
+      const candidatePos: Vec2 = [
         ag.position[0] + vx * dt,
         ag.position[1] + vz * dt,
       ];
+      const stepHit = findFirstWallHitOnSegment(
+        ag.position,
+        candidatePos,
+        ag.seatY,
+        wallBlockers,
+        ag.objectId,
+      );
+      if (stepHit.blocked) {
+        // Hard collision clamp: stop right against the wall/barrier without ever phasing through!
+        ag.position = stepHit.stopPoint;
+        ag.velocity = [0, 0];
+        ag.state = 'queuing';
+        ag.trappedByWall = true;
+        continue;
+      }
+
+      ag.velocity = [vx, vz];
+      ag.position = candidatePos;
 
       // Update facing yaw in degrees (0° faces -Z: atan2(-vx, -vz))
       if (Math.hypot(vx, vz) > 0.05) {

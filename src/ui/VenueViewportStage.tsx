@@ -1444,6 +1444,45 @@ export function VenueViewportStage({
         </div>
       )}
 
+      {/* Prominent Evacuation Error Callout Banner when any person is blocked from reaching an exit */}
+      {((evacSimResult?.trappedCount ?? evaluation.evacuation?.trappedCount ?? 0) >
+        0) && (
+        <div
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: '58px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 14,
+            maxWidth: '720px',
+            width: 'calc(100% - 32px)',
+            background: 'rgba(127, 29, 29, 0.94)',
+            border: '1px solid #ef4444',
+            borderRadius: '8px',
+            padding: '8px 14px',
+            color: '#fef2f2',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <span>
+            🚨 EXIT UNREACHABLE:{' '}
+            {evacSimResult?.trappedCount ??
+              evaluation.evacuation?.trappedCount ??
+              0}{' '}
+            of {snapshot.roster.length} people got as close as possible to the
+            nearest exit and stopped at a wall/obstacle. Click &ldquo;Instant
+            Repair&rdquo; to add reachable exits!
+          </span>
+        </div>
+      )}
+
       {/* 1:1 Optical Viewfinder Badge when in Seat POV */}
       {viewMode === 'attendee_pov' && (
         <div
