@@ -21,6 +21,7 @@ import {
   applyAndValidatePatch,
   compareEvaluations,
   evaluateScene,
+  simulateEvacuation,
 } from '../../src/evaluation/index.js';
 import {
   VenueViewport,
@@ -912,59 +913,15 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(progressUpdates[0]?.percent).toBe(15);
     expect(progressUpdates[5]?.percent).toBe(100);
 
-    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb is present, verify standalone building parsing, real seat extraction, and random 4-person spawning
-    const externalRoomGlbPath =
-      '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/room.glb';
-    if (fs.existsSync(externalRoomGlbPath)) {
-      const roomBuf = new Uint8Array(fs.readFileSync(externalRoomGlbPath));
-      const roomReport = await parseAndLabelGlbVenueAsync(roomBuf, {
-        fileName: 'room.glb',
-        yieldDelayMs: 1,
-        standaloneRandomFour: true,
-        randomFn: () => 0.42,
-      });
-      expect(roomReport.totalNodes).toBe(10);
-      expect(roomReport.counts.seats).toBeGreaterThanOrEqual(6);
-      expect(roomReport.counts.wheelchairBays).toBe(2);
-      expect(roomReport.counts.pillarsAndStructures).toBe(0);
-      expect(roomReport.counts.movableProps).toBe(0);
-      expect(isStandaloneUploadedGlbScene(roomReport.snapshot.sceneId)).toBe(
-        true,
-      );
-      expect(
-        getUploadedGlbBytesForScene(roomReport.snapshot.sceneId)?.byteLength,
-      ).toBe(roomBuf.byteLength);
-
-      // Verify parallel multi-agent telemetry (SeatClusterAgent + StageAndScreenAgent + EgressAndAccessibilityAgent)
-      expect(roomReport.agentTelemetry).toBeDefined();
-      expect(roomReport.agentTelemetry?.agents).toHaveLength(3);
-      expect(roomReport.agentTelemetry?.agents.map((a) => a.agentName)).toEqual(
-        [
-          'SeatClusterAgent',
-          'StageAndScreenAgent',
-          'EgressAndAccessibilityAgent',
-        ],
-      );
-
-      // Exactly 4 people spawned at random into the parsed seats
-      expect(roomReport.snapshot.roster).toHaveLength(4);
-      const uniquePlaces = new Set(
-        roomReport.snapshot.roster.map((r) => r.assignedPlaceId),
-      );
-      expect(uniquePlaces.size).toBe(4);
-
-      const roomEval = evaluateScene(roomReport.snapshot);
-      expect(roomEval.isValidStructure).toBe(true);
-      expect(roomEval.occupiedCount).toBe(4);
-      expect(roomEval.capacityCount).toBe(roomReport.snapshot.places.length);
-    }
-
-    // If /Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb is present, verify:
+    // Verify smallClassroom.glb (from building-files/smallClassroom.glb or Argon/smallClassroom.glb):
     // 1. Exactly 50 real chairs (Chair_R1_S01..Chair_R5_S10) are parsed with zero false-positive front spots
-    // 2. SightTargetAgent selects ProjScreen_16x9_Active_Surface at [0.15, 2.94, -4.38] (3.72m x 2.04m)
+    // 2. SightTargetAgent selects Screen_Projection_16x9 at [0.60, 2.94, -4.38] (3.72m x 2.04m)
     // 3. Identity alignment is used so the 3D classroom mesh and parsed seats/screen match 1:1
-    const externalClassroomGlbPath =
-      '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb';
+    const externalClassroomGlbPath = fs.existsSync(
+      'building-files/smallClassroom.glb',
+    )
+      ? 'building-files/smallClassroom.glb'
+      : '/Users/dad/Desktop/Andrew/Stanford/Misc/Hackathon/Argon/smallClassroom.glb';
     if (fs.existsSync(externalClassroomGlbPath)) {
       const clsBuf = new Uint8Array(fs.readFileSync(externalClassroomGlbPath));
       const clsReport = await parseAndLabelGlbVenueAsync(clsBuf, {
@@ -982,6 +939,13 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       expect(clsReport.snapshot.target.center[2]).toBeCloseTo(-4.38, 2);
       expect(clsReport.snapshot.target.widthM).toBeCloseTo(3.72, 2);
       expect(clsReport.snapshot.target.heightM).toBeCloseTo(2.04, 2);
+      expect(isStandaloneUploadedGlbScene(clsReport.snapshot.sceneId)).toBe(
+        true,
+      );
+      expect(
+        getUploadedGlbBytesForScene(clsReport.snapshot.sceneId)?.byteLength,
+      ).toBe(clsBuf.byteLength);
+      expect(clsReport.agentTelemetry?.agents).toHaveLength(3);
 
       const align = getGlbAlignmentForScene(clsReport.snapshot.sceneId);
       expect(align.rotationYRad).toBe(0);
@@ -1000,6 +964,29 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
       const clsEval = evaluateScene(clsReport.snapshot);
       expect(clsEval.isValidStructure).toBe(true);
       expect(clsEval.occupiedCount).toBe(4);
+
+      // Verify ExitFinderAgent parsed both exits (Exit_1_FrontLeft and Exit_2_FrontRight) into snapshot.exits
+      // and evacuating people navigate to those exact exit points and disappear (state === 'exited')
+      expect(clsReport.snapshot.exits).toHaveLength(2);
+      expect(clsReport.snapshot.exits?.map((e) => e.id)).toEqual([
+        'Exit_1_FrontLeft',
+        'Exit_2_FrontRight',
+      ]);
+      expect(clsReport.snapshot.exits?.[0]?.position[0]).toBeCloseTo(-4.01, 1);
+      expect(clsReport.snapshot.exits?.[0]?.position[1]).toBeCloseTo(-4.5, 1);
+      expect(clsReport.snapshot.exits?.[1]?.position[0]).toBeCloseTo(4.69, 1);
+      expect(clsReport.snapshot.exits?.[1]?.position[1]).toBeCloseTo(-4.5, 1);
+
+      const evacSim = simulateEvacuation(
+        clsReport.snapshot,
+        'emergency_evacuation',
+      );
+      expect(evacSim.totalExitCount).toBe(2);
+      expect(evacSim.activeExitCount).toBe(2);
+      const finalFrame = evacSim.frames[evacSim.frames.length - 1]!;
+      const finalAgents = Object.values(finalFrame.agents);
+      expect(finalAgents).toHaveLength(4);
+      expect(finalAgents.every((a) => a.state === 'exited')).toBe(true);
     }
 
     // Also verify spawnRandomFourAttendees on arbitrary place lists

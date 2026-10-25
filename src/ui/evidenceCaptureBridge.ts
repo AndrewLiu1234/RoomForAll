@@ -129,6 +129,58 @@ export function populateThreeSceneFromSnapshot(
     });
     targetOutlineGroup.add(new THREE.LineSegments(edgesGeo, edgesMat));
     scene.add(targetOutlineGroup);
+
+    // Render 3D Exit Point Markers at each parsed exit location (`snapshot.exits`) where people navigate to and disappear!
+    const exitPortals = snapshot.exits ?? [];
+    for (const exit of exitPortals) {
+      const [ex, ez] = exit.position;
+      const exitPointGroup = new THREE.Group();
+      exitPointGroup.name = `exit_point_marker_${exit.id}`;
+      exitPointGroup.position.set(ex, 0.03, ez);
+
+      const outerRingGeo = new THREE.RingGeometry(0.34, 0.44, 32);
+      const outerRingMat = new THREE.MeshBasicMaterial({
+        color: 0x10b981,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
+      outerRing.rotation.x = -Math.PI / 2;
+      exitPointGroup.add(outerRing);
+
+      const innerDiscGeo = new THREE.CircleGeometry(0.22, 24);
+      const innerDiscMat = new THREE.MeshBasicMaterial({
+        color: 0x34d399,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.65,
+      });
+      const innerDisc = new THREE.Mesh(innerDiscGeo, innerDiscMat);
+      innerDisc.rotation.x = -Math.PI / 2;
+      innerDisc.position.y = 0.005;
+      exitPointGroup.add(innerDisc);
+
+      const stemGeo = new THREE.CylinderGeometry(0.02, 0.02, 1.3, 8);
+      const stemMat = new THREE.MeshBasicMaterial({
+        color: 0x10b981,
+        transparent: true,
+        opacity: 0.8,
+      });
+      const stemMesh = new THREE.Mesh(stemGeo, stemMat);
+      stemMesh.position.y = 0.65;
+      exitPointGroup.add(stemMesh);
+
+      const diamondGeo = new THREE.OctahedronGeometry(0.18, 0);
+      const diamondMat = new THREE.MeshBasicMaterial({
+        color: 0x34d399,
+      });
+      const diamondMesh = new THREE.Mesh(diamondGeo, diamondMat);
+      diamondMesh.position.y = 1.35;
+      exitPointGroup.add(diamondMesh);
+
+      scene.add(exitPointGroup);
+    }
   } else if (!isStandaloneGlb) {
     // Room floor
     const roomWidth = snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0];

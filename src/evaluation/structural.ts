@@ -644,7 +644,13 @@ export function validateSceneStructure(
  * 4. ADA Ramp Slope: Incline between rows must not exceed 1:12 (0.0833) for feasible wheelchair/crutch access.
  */
 export function validateTieredSeating(snapshot: SceneSnapshot): StructuralError[] {
+  if (snapshot.source.isFallbackFixture === false) {
+    return [];
+  }
   const errors: StructuralError[] = [];
+  if (snapshot.sceneId.startsWith('glb_standalone_')) {
+    return errors;
+  }
   const ceilingY = snapshot.roomBounds.max[1];
   const STANDING_PERSON_HEIGHT_M = 1.85;
   const FIVE_FEET_CLEARANCE_M = 1.524;

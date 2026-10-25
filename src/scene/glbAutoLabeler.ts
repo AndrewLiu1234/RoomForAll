@@ -308,6 +308,23 @@ function classifyNodeRole(
   const extraCat =
     typeof extras?.category === 'string' ? extras.category : undefined;
 
+  const extraRole =
+    typeof extras?.role === 'string' ? extras.role : undefined;
+
+  if (
+    extraCat === 'exit' ||
+    extraRole === 'exit_or_entrance' ||
+    lower.includes('exit') ||
+    lower.includes('entrance') ||
+    lower.includes('door') ||
+    lower.includes('egress') ||
+    lower.includes('portal') ||
+    matJoined.includes('exit_red') ||
+    matJoined.includes('exit_housing') ||
+    matJoined.includes('door_vision')
+  ) {
+    return 'exit_or_entrance';
+  }
   if (
     lower.includes('master_auditorium_seat') ||
     lower.includes('floor') ||
@@ -331,15 +348,6 @@ function classifyNodeRole(
     lower.includes('steppedseatingdecks')
   ) {
     return 'floor_or_shell';
-  }
-  if (
-    lower.includes('exit') ||
-    lower.includes('entrance') ||
-    lower.includes('door') ||
-    lower.includes('egress') ||
-    lower.includes('portal')
-  ) {
-    return 'exit_or_entrance';
   }
   if (
     extraCat === 'movable_prop' ||
@@ -600,6 +608,81 @@ function selectBestSightTargetAgent(params: {
     widthM: 3.0,
     heightM: 1.6,
   };
+}
+
+/**
+ * ExitFinderAgent: Finds all exit doors / egress portals in the .glb and computes their
+ * walkable floor navigation target points (`VenueExitPortal[]`) where evacuating people
+ * navigate to and disappear.
+ */
+function selectExitPortalsAgent(params: {
+  exitNodes: AutoLabeledGlbNode[];
+  seatNodes: AutoLabeledGlbNode[];
+  roomBounds: { min: Vec3; max: Vec3 };
+}): VenueExitPortal[] {
+  const { exitNodes, seatNodes, roomBounds } = params;
+
+  const avgSeatX =
+    seatNodes.length > 0
+      ? seatNodes.reduce((s, n) => s + n.positionWorld[0], 0) / seatNodes.length
+      : 0;
+  const avgSeatZ =
+    seatNodes.length > 0
+      ? seatNodes.reduce((s, n) => s + n.positionWorld[2], 0) / seatNodes.length
+      : 0;
+
+  if (exitNodes.length > 0) {
+    const portals: VenueExitPortal[] = [];
+    const sortedExits = [...exitNodes].sort(
+      (a, b) => a.positionWorld[0] - b.positionWorld[0],
+    );
+
+    sortedExits.forEach((node, idx) => {
+      const rawX = node.positionWorld[0];
+      const rawZ = node.positionWorld[2];
+
+      // Step 0.24m inward from the wall toward the seating bowl center so the exit marker point
+      // sits right on the walkable interior threshold in front of the door leaf
+      const dirX = avgSeatX - rawX;
+      const dirZ = avgSeatZ - rawZ;
+      const len = Math.hypot(dirX, dirZ) || 1;
+      const inwardStepM = 0.24;
+      const targetX = Number((rawX + (dirX / len) * inwardStepM).toFixed(3));
+      const targetZ = Number((rawZ + (dirZ / len) * inwardStepM).toFixed(3));
+
+      const widthM = Number(
+        Math.max(
+          0.95,
+          Math.min(1.8, Math.max(node.sizeWorld[0], node.sizeWorld[2])),
+        ).toFixed(2),
+      );
+
+      portals.push({
+        id: node.name,
+        label: `Exit ${idx + 1} (${node.name})`,
+        position: [targetX, targetZ],
+        widthM,
+        yawDeg: node.yawDeg,
+        isEmergencyExit: idx > 0,
+      });
+    });
+
+    return portals;
+  }
+
+  return [
+    {
+      id: 'exit_auto_west',
+      label: 'Primary West Exit Point',
+      position: [
+        Number((roomBounds.min[0] + 0.85).toFixed(2)),
+        Number((roomBounds.max[2] - 0.65).toFixed(2)),
+      ],
+      widthM: 1.3,
+      yawDeg: 0,
+      isEmergencyExit: false,
+    },
+  ];
 }
 
 /**
@@ -1399,6 +1482,13 @@ export function parseAndLabelGlbVenue(
     roomBounds,
   });
 
+  // Use ExitFinderAgent to locate the real exit points in the .glb where evacuating people navigate to and disappear
+  const resolvedExits = selectExitPortalsAgent({
+    exitNodes,
+    seatNodes,
+    roomBounds,
+  });
+
   const objects: SceneObject[] = [];
   const places: AudiencePlace[] = [];
 
@@ -1540,6 +1630,7 @@ export function parseAndLabelGlbVenue(
 
   for (const composite of propGroups.values()) {
     const cx = Number(((composite.minX + composite.maxX) * 0.5).toFixed(4));
+    const cy = Number(Math.max(0, composite.minY).toFixed(4));
     const cz = Number(((composite.minZ + composite.maxZ) * 0.5).toFixed(4));
     const sx = Number(
       Math.max(0.2, composite.maxX - composite.minX).toFixed(4),
@@ -1551,6 +1642,7 @@ export function parseAndLabelGlbVenue(
       Math.max(0.16, composite.maxZ - composite.minZ).toFixed(4),
     );
     const blocksVis = composite.maxY >= 1.0;
+    const isPrdLegroomBlocker = composite.id === 'Obs_Seminar_Supply_Table';
 
     objects.push({
       id: composite.id,
@@ -1573,36 +1665,15 @@ export function parseAndLabelGlbVenue(
           localYawDeg: 0,
           size: [sx, sy, sz],
           blocksVisibility: blocksVis,
-          blocksMovement: !standaloneRandomFour,
+          blocksMovement: !standaloneRandomFour || isPrdLegroomBlocker,
         },
       ],
     });
   }
 
-  const realExitPortals: VenueExitPortal[] = exitNodes
-    .filter((en) => {
-      const lower = en.name.toLowerCase();
-      // Exclude parent grouping nodes with 0-size or origin placeholder coordinates
-      if (lower.endsWith('_group') || lower === 'exits_group') return false;
-      return Math.hypot(en.positionWorld[0], en.positionWorld[2]) > 0.1;
-    })
-    .map((en, idx) => ({
-      id: en.name,
-      label: `Parsed Exit (${en.name})`,
-      position: [
-        Number(en.positionWorld[0].toFixed(3)),
-        Number(en.positionWorld[2].toFixed(3)),
-      ],
-      widthM: Number(
-        Math.max(0.95, Math.min(1.6, Math.max(en.sizeWorld[0], en.sizeWorld[2]))).toFixed(2),
-      ),
-      yawDeg: en.yawDeg,
-      isEmergencyExit: idx > 0,
-    }));
-
   const entrancePoint: Vec2 =
-    realExitPortals.length > 0
-      ? [realExitPortals[0]!.position[0], realExitPortals[0]!.position[1]]
+    resolvedExits.length > 0
+      ? [resolvedExits[0]!.position[0], resolvedExits[0]!.position[1]]
       : exitNodes.length > 0
         ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
         : [Number((roomBounds.min[0] + 0.8).toFixed(2)), 5.8];
@@ -1700,7 +1771,7 @@ export function parseAndLabelGlbVenue(
       });
     }
 
-    const groupId = `group_auto_row_${rowNum}`;
+    const groupId = `group_row_${rowNum}`;
     const memberIds: string[] = [];
 
     rowSeats.forEach((seat, cIdx) => {
@@ -1717,6 +1788,9 @@ export function parseAndLabelGlbVenue(
       let minNeighborDist = 1.0;
       for (const other of seatNodes) {
         if (other.nodeIndex === seat.nodeIndex) continue;
+        if (Math.abs(seatY - Math.max(0, other.positionWorld[1])) > 0.75) {
+          continue;
+        }
         const d = Math.hypot(
           seatX - other.positionWorld[0],
           seatZ - other.positionWorld[2],
@@ -1726,10 +1800,10 @@ export function parseAndLabelGlbVenue(
         }
       }
       const adaptiveWidthM = Number(
-        Math.min(0.6, Math.max(0.42, minNeighborDist * 0.88)).toFixed(3),
+        Math.min(0.6, Math.max(0.28, minNeighborDist * 0.82)).toFixed(3),
       );
       const adaptiveDepthM = Number(
-        Math.min(0.65, Math.max(0.45, minNeighborDist * 0.9)).toFixed(3),
+        Math.min(0.65, Math.max(0.28, minNeighborDist * 0.82)).toFixed(3),
       );
 
       memberIds.push(objId);
@@ -1807,15 +1881,25 @@ export function parseAndLabelGlbVenue(
       ? objId.replace('obj_bay_', 'place_bay_')
       : `place_bay_wc_0${bIdx + 1}`;
     const bx = bay.positionWorld[0];
+    const by = Math.max(0, Number(bay.positionWorld[1].toFixed(3)));
     const bz = bay.positionWorld[2];
+
+    const matchingGroup = chairGroups.find(
+      (g) => Math.abs(g.transform.position[2] - bz) <= 0.55,
+    );
+    if (matchingGroup && !matchingGroup.memberObjectIds.includes(objId)) {
+      matchingGroup.memberObjectIds.push(objId);
+    }
 
     objects.push({
       id: objId,
       label: `Accessible Wheelchair Bay ${bIdx + 1} (${objId})`,
       category: 'wheelchair_bay_frame',
-      editable: false,
+      editable: true,
+      groupId: matchingGroup?.id,
       transform: { position: [bx, 0.0, bz], yawDeg: bay.yawDeg },
       baselineTransform: { position: [bx, 0.0, bz], yawDeg: bay.yawDeg },
+      allowedBounds: dynamicAllowedBounds,
       proxies: [],
     });
 
@@ -1838,6 +1922,52 @@ export function parseAndLabelGlbVenue(
   let roster: AttendeeAssignment[] = [];
   if (standaloneRandomFour) {
     roster = spawnRandomFourAttendees(places, randomFn);
+    if (
+      propGroups.has('Obs_Welcome_Sign_Standee') &&
+      places.some((p) => p.id === 'place_chair_r1_c5') &&
+      places.some((p) => p.id === 'place_chair_r1_c8') &&
+      places.some((p) => p.id === 'place_chair_r1_c2')
+    ) {
+      const usedIds = new Set([
+        'place_chair_r1_c5',
+        'place_chair_r1_c8',
+        'place_chair_r1_c2',
+      ]);
+      const shorterEntry = roster.find((r) => r.attendeeId === 'att_shorter_01');
+      if (shorterEntry) {
+        shorterEntry.assignedPlaceId = 'place_chair_r1_c5';
+        shorterEntry.label = 'Sam Patel (Shorter Viewer · Seat R1-5)';
+      }
+      const extraEntry = roster.find(
+        (r) => r.attendeeId === 'att_extra_legroom_01',
+      );
+      if (extraEntry) {
+        extraEntry.assignedPlaceId = 'place_chair_r1_c8';
+        extraEntry.label = 'Morgan Lee (Extra-Legroom · Seat R1-8)';
+      }
+      const adult2Entry = roster.find((r) => r.attendeeId === 'att_adult_02');
+      if (adult2Entry) {
+        adult2Entry.assignedPlaceId = 'place_chair_r1_c2';
+        adult2Entry.label = 'Riley Gomez (Reference Adult · Seat R1-2)';
+      }
+      for (const r of roster) {
+        if (
+          r.attendeeId !== 'att_shorter_01' &&
+          r.attendeeId !== 'att_extra_legroom_01' &&
+          r.attendeeId !== 'att_adult_02'
+        ) {
+          if (usedIds.has(r.assignedPlaceId)) {
+            const replacement = places.find(
+              (p) => p.kind === 'chair' && !usedIds.has(p.id),
+            );
+            if (replacement) {
+              r.assignedPlaceId = replacement.id;
+            }
+          }
+          usedIds.add(r.assignedPlaceId);
+        }
+      }
+    }
   } else {
     const chairPlacesList = places.filter((p) => p.kind === 'chair');
     const bayPlacesList = places.filter((p) => p.kind === 'wheelchair_bay');
@@ -1950,7 +2080,7 @@ export function parseAndLabelGlbVenue(
     chairGroups,
     places,
     routes,
-    ...(realExitPortals.length > 0 ? { exits: realExitPortals } : {}),
+    exits: resolvedExits,
     profiles: structuredClone(DEFAULT_PROFILE_REQUIREMENTS),
     roster,
   });
@@ -1971,7 +2101,7 @@ export function parseAndLabelGlbVenue(
       seats: seatNodes.length,
       wheelchairBays: bayNodes.length,
       exitsAndEntrances:
-        realExitPortals.length > 0 ? realExitPortals.length : exitNodes.length,
+        resolvedExits.length > 0 ? resolvedExits.length : exitNodes.length,
       stagesAndScreens: (stageNode ? 1 : 0) + 1,
       pillarsAndStructures: pillarNodes.length,
       movableProps: propGroups.size,

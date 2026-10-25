@@ -494,10 +494,23 @@ export function updateAvatarAnimationPose(
   );
   // Standing torso center is 1.05m above surface; wheelchair seated torso center is 0.625m above surface
   const torsoBaseOffset = isWheelchair ? 0.625 : 1.05;
+  // If seated on a tall multi-tier GLB riser (e.g. smallClassroom.glb where Row 5 is at y=0.88m -> baseCenterWorld[1] = 1.75m),
+  // smoothly ramp down to floor level (y=0) as evacuees walk forward toward -Z exits.
+  const extraGlbRiserH = Math.max(
+    0,
+    baseCenterWorld[1] - (surfaceElevation + 0.87),
+  );
+  const glbRampFactor =
+    extraGlbRiserH > 0.05 && agentState.position[1] < 0
+      ? Math.max(0, Math.min(1, (agentState.position[1] + 2.8) / 3.5))
+      : 1;
 
   rootMesh.position.set(
     agentState.position[0],
-    surfaceElevation + torsoBaseOffset + bobM,
+    surfaceElevation +
+      extraGlbRiserH * glbRampFactor +
+      torsoBaseOffset +
+      bobM,
     agentState.position[1],
   );
   rootMesh.rotation.y = agentState.yawDeg * DEG_TO_RAD;
