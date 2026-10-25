@@ -23,6 +23,9 @@ import {
   captureEvidence,
   createPreparedVenueReferencePatch,
   createPreparedVenueSnapshot,
+  generateVenueGlbBinary,
+  parseAndLabelGlbVenue,
+  type GlbVenueParseReport,
   type OverviewCameraPreset,
 } from './index.js';
 
@@ -140,9 +143,17 @@ export function PartADemoApp(): React.ReactElement {
     useState<CapturedEvidencePayload | null>(null);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
+  const [glbParseReport, setGlbParseReport] =
+    useState<GlbVenueParseReport | null>(null);
+  const [useParsedGlbSnapshot, setUseParsedGlbSnapshot] =
+    useState<boolean>(false);
 
   const activeSnapshot =
-    scenePhase === 'patched' ? patchedSnapshot : baselineSnapshot;
+    useParsedGlbSnapshot && glbParseReport
+      ? glbParseReport.snapshot
+      : scenePhase === 'patched'
+        ? patchedSnapshot
+        : baselineSnapshot;
   const activeEval = useMemo(
     () => evaluateScene(activeSnapshot),
     [activeSnapshot],
@@ -806,6 +817,113 @@ export function PartADemoApp(): React.ReactElement {
               <div style={{ color: '#94a3b8' }}>{op.reason}</div>
             </div>
           ))}
+        </div>
+
+        {/* GLB 3D Building Parser & Seat/Exit Auto-Labeler */}
+        <div
+          style={{
+            padding: '12px',
+            borderRadius: '8px',
+            background: '#1e293b',
+            border: '1px solid rgba(167, 139, 250, 0.35)',
+          }}
+        >
+          <div style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '4px', color: '#c4b5fd' }}>
+            3D Building GLB Parser &amp; Auto-Labeler
+          </div>
+          <div style={{ fontSize: '0.73rem', color: '#94a3b8', marginBottom: '8px' }}>
+            Upload any <code>.glb</code> 3D venue or parse <code>prepared-venue.glb</code> to auto-label seats, bays, exits, stage, and props.
+          </div>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                const { glbBytes } = generateVenueGlbBinary(baselineSnapshot);
+                const report = parseAndLabelGlbVenue(glbBytes, {
+                  fileName: 'prepared-venue.glb',
+                });
+                setGlbParseReport(report);
+              }}
+              style={{
+                flex: 1,
+                padding: '6px 8px',
+                borderRadius: '5px',
+                border: '1px solid #8b5cf6',
+                background: '#4c1d95',
+                color: '#f5f3ff',
+                fontSize: '0.73rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Parse prepared-venue.glb
+            </button>
+            <label
+              style={{
+                flex: 1,
+                padding: '6px 8px',
+                borderRadius: '5px',
+                border: '1px solid #475569',
+                background: '#0f172a',
+                color: '#e2e8f0',
+                fontSize: '0.73rem',
+                fontWeight: 600,
+                textAlign: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              Upload .glb File
+              <input
+                type="file"
+                accept=".glb"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const buf = new Uint8Array(await file.arrayBuffer());
+                  const report = parseAndLabelGlbVenue(buf, {
+                    fileName: file.name,
+                  });
+                  setGlbParseReport(report);
+                  setUseParsedGlbSnapshot(true);
+                }}
+              />
+            </label>
+          </div>
+
+          {glbParseReport && (
+            <div
+              style={{
+                padding: '8px',
+                borderRadius: '5px',
+                background: '#0f172a',
+                fontSize: '0.72rem',
+                color: '#cbd5e1',
+                lineHeight: 1.45,
+              }}
+            >
+              <div>
+                <strong>File:</strong> <code>{glbParseReport.fileName}</code> (
+                {glbParseReport.byteLength} B · {glbParseReport.totalNodes} nodes)
+              </div>
+              <div>
+                <strong>Labeled Seats:</strong> {glbParseReport.counts.seats} ·{' '}
+                <strong>Wheelchair Bays:</strong>{' '}
+                {glbParseReport.counts.wheelchairBays}
+              </div>
+              <div>
+                <strong>Stage / Screen:</strong>{' '}
+                {glbParseReport.counts.stagesAndScreens} ·{' '}
+                <strong>Pillars:</strong>{' '}
+                {glbParseReport.counts.pillarsAndStructures} ·{' '}
+                <strong>Props:</strong> {glbParseReport.counts.movableProps}
+              </div>
+              <div>
+                <strong>Synthesized Routes:</strong>{' '}
+                {glbParseReport.snapshot.routes.length} corridors
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Full 24-Attendee Roster */}

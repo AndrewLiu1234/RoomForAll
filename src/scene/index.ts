@@ -32,6 +32,13 @@ export {
 } from './preparedVenue.js';
 
 export {
+  parseAndLabelGlbVenue,
+  type AutoLabeledGlbNode,
+  type AutoLabeledNodeRole,
+  type GlbVenueParseReport,
+} from './glbAutoLabeler.js';
+
+export {
   applyAttendeeCameraPose,
   applyKeyframeToCamera,
   applyOverviewCameraPose,

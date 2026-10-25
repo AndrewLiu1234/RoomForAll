@@ -38,6 +38,7 @@ import {
   getOverviewCameraPose,
   getProxyWorldTransform,
   loadPreparedVenueManifest,
+  parseAndLabelGlbVenue,
   parseVenueGlbBinary,
 } from '../../src/scene/index.js';
 
@@ -748,5 +749,35 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     const cmp = compareEvaluations(baseEval, revEval);
     expect(cmp.accepted).toBe(true);
     expect(cmp.outcome).toBe('accepted');
+  });
+
+  it('auto-labels seats, wheelchair bays, stage, screen, pillars, and props from a binary .glb venue via parseAndLabelGlbVenue', () => {
+    const venueDir = path.resolve(process.cwd(), 'public', 'venue');
+    const glbBytes = new Uint8Array(
+      fs.readFileSync(path.join(venueDir, 'prepared-venue.glb')),
+    );
+    const report = parseAndLabelGlbVenue(glbBytes, {
+      fileName: 'prepared-venue.glb',
+    });
+
+    expect(report.counts.seats).toBe(22);
+    expect(report.counts.wheelchairBays).toBe(2);
+    expect(report.counts.stagesAndScreens).toBe(2);
+    expect(report.counts.pillarsAndStructures).toBe(2);
+    expect(report.counts.movableProps).toBe(3);
+    expect(report.snapshot.places).toHaveLength(24);
+    expect(report.snapshot.roster).toHaveLength(24);
+
+    // Verify the auto-labeled snapshot renders cleanly in buildVenueThreeScene and scores in evaluateScene
+    const built = buildVenueThreeScene(report.snapshot, {
+      cleanForEvidenceCapture: false,
+      viewMode: 'overview',
+    });
+    expect(built.objectNodesById.size).toBe(report.snapshot.objects.length);
+    disposeVenueScene(built.scene);
+
+    const evaluated = evaluateScene(report.snapshot);
+    expect(evaluated.isValidStructure).toBe(true);
+    expect(evaluated.occupiedCount).toBe(24);
   });
 });
