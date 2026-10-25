@@ -27,8 +27,11 @@
 import {
   CONTRACT_VERSION,
   DEFAULT_PROFILE_REQUIREMENTS,
+  DEG_TO_RAD,
   hashStringDeterministic,
   withUpdatedSceneHash,
+  yawDegToForwardVector,
+  yawDegToRightVector,
   type AudiencePlace,
   type AttendeeAssignment,
   type ChairGroup,
@@ -928,18 +931,25 @@ export function generateVenueGlbBinary(snapshot: SceneSnapshot): {
             (firstProxy.radiusM ?? 0.25) * 2,
           ]
       : [0.9, 0.04, 1.3];
-    const localOffsetY = firstProxy ? firstProxy.localPosition[1] : 0.02;
-    const localOffsetZ = firstProxy ? firstProxy.localPosition[2] : 0.0;
+    const [lx, ly, lz] = firstProxy
+      ? firstProxy.localPosition
+      : [0.0, 0.02, 0.0];
+    const right = yawDegToRightVector(obj.transform.yawDeg);
+    const forward = yawDegToForwardVector(obj.transform.yawDeg);
+    const totalYawRad =
+      (obj.transform.yawDeg + (firstProxy?.localYawDeg ?? 0)) * DEG_TO_RAD;
+    const halfYaw = totalYawRad / 2;
 
     const nodeIndex = nodes.length;
     nodes.push({
       name: obj.id,
       mesh: 0,
       translation: [
-        obj.transform.position[0],
-        obj.transform.position[1] + localOffsetY,
-        obj.transform.position[2] + localOffsetZ,
+        obj.transform.position[0] + lx * right[0] - lz * forward[0],
+        obj.transform.position[1] + ly,
+        obj.transform.position[2] + lx * right[2] - lz * forward[2],
       ],
+      rotation: [0, Math.sin(halfYaw), 0, Math.cos(halfYaw)],
       scale,
       extras: {
         category: obj.category,

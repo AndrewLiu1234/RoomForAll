@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import {
   CONTRACT_VERSION,
   INSPECTION_CAMERA,
+  getAttendeeCameraPose,
   type CapturedEvidencePayload,
   type CaptureKeyframe,
   type CaptureTourSpec,
@@ -96,10 +97,31 @@ export async function captureEvidence(
   const requestedDurationSec =
     tourSpec.totalDurationSec > 0 ? tourSpec.totalDurationSec : 3;
 
-  const keyframes: CaptureKeyframe[] =
+  const rawKeyframes: CaptureKeyframe[] =
     tourSpec.keyframes && tourSpec.keyframes.length > 0
       ? structuredClone(tourSpec.keyframes)
       : buildDefaultCaptureKeyframes(snapshot, requestedDurationSec);
+
+  // Ensure every attendee_pov keyframe reflects the current snapshot's world seat transform
+  const keyframes: CaptureKeyframe[] = rawKeyframes.map((kf) => {
+    if (kf.kind === 'attendee_pov' && kf.attendeeId) {
+      const inRoster = snapshot.roster.some(
+        (a) => a.attendeeId === kf.attendeeId,
+      );
+      if (inRoster) {
+        const pose = getAttendeeCameraPose(snapshot, kf.attendeeId);
+        return {
+          ...kf,
+          placeId: pose.placeId,
+          cameraPosition: pose.eyePositionWorld,
+          cameraLookAt: pose.lookAtWorld,
+          fovDeg: pose.fovDeg,
+          aspect: pose.aspect,
+        };
+      }
+    }
+    return kf;
+  });
 
   const canAttemptBrowserCapture =
     typeof window !== 'undefined' &&

@@ -7,7 +7,7 @@
     "license": "CC0-1.0",
     "sourceUrl": "https://3dassets.dev/packs/village-hall-and-community-events",
     "assetPath": "/venue/prepared-venue.glb",
-    "assetHash": "vp_15060fb232878eb6",
+    "assetHash": "vp_42a90a9413569f91",
     "isFallbackFixture": true,
     "preparationNotes": "Prepared single-level 24-place community lecture hall (22 chairs + 2 wheelchair bays) with deterministic glTF 2.0 binary asset and collision/occlusion proxy manifest. Village Hall CDN returned HTTP 403 during automated preparation check; generated clean CC0 architectural GLB fixture per PRD §3 fallback protocol."
   },
@@ -2337,5 +2337,5 @@
       "assignedPlaceId": "place_bay_wc_01"
     }
   ],
-  "sceneHash": "vp_bd0014f128888e9e"
+  "sceneHash": "vp_703ef889d75a7bc4"
 }

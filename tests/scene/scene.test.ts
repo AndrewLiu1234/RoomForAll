@@ -512,4 +512,68 @@ describe('Stream A — Scene, Prepared Venue & Evidence Capture', () => {
     expect(element.type).toBe(VenueViewport);
     expect(element.props.viewMode).toBe('attendee_pov');
   });
+
+  it('correctly rotates local proxy offsets under right-handed yaw and updates revision POV keyframes when seats move', async () => {
+    const snapshot = createPreparedVenueSnapshot();
+    const chair = structuredClone(
+      snapshot.objects.find((o) => o.category === 'movable_chair')!,
+    );
+    chair.transform.position = [1.0, 0.0, 2.0];
+    chair.transform.yawDeg = 90; // Facing -X ([-1, 0, 0])
+
+    const backProxy = chair.proxies[0]!; // localPosition = [0, 0.42, +0.22]
+    const worldTf = getProxyWorldTransform(chair, backProxy);
+    // Since chair faces -X, its back (+Z local) must sit at +X (1.0 + 0.22 = 1.22)
+    expect(worldTf.centerWorld[0]).toBeCloseTo(1.22, 5);
+    expect(worldTf.centerWorld[1]).toBeCloseTo(0.42, 5);
+    expect(worldTf.centerWorld[2]).toBeCloseTo(2.0, 5);
+
+    // Move att_shorter_01's chair in a revision snapshot and verify captureEvidence updates stale keyframe cameraPosition
+    const moved = structuredClone(snapshot);
+    const shorterMember = moved.roster.find(
+      (a) => a.attendeeId === 'att_shorter_01',
+    )!;
+    const shorterPlace = moved.places.find(
+      (p) => p.id === shorterMember.assignedPlaceId,
+    )!;
+    const movedChair = moved.objects.find(
+      (o) => o.id === shorterPlace.objectId,
+    )!;
+    movedChair.transform.position[0] += 0.35;
+    moved.sceneHash = computeSceneHash(moved);
+
+    const { manifest } = await captureEvidence(moved, {
+      captureId: 'cap_rev_1',
+      runId: 'run_rev_1',
+      phase: 'revision',
+      sceneHash: moved.sceneHash,
+      snapshot: moved,
+      keyframes: [
+        {
+          viewId: 'pov_att_shorter_01',
+          label: 'Shorter Viewer POV',
+          kind: 'attendee_pov',
+          attendeeId: 'att_shorter_01',
+          cameraPosition: [0, 0, 0], // stale coordinates
+          cameraLookAt: [0, 0, -1],
+          fovDeg: 60,
+          aspect: 1.5,
+          startSec: 0,
+          endSec: 2,
+        },
+      ],
+      totalDurationSec: 2,
+      deadlineIso: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    const updatedPose = getAttendeeCameraPose(moved, 'att_shorter_01');
+    expect(manifest.keyframes[0]?.cameraPosition).toEqual(
+      updatedPose.eyePositionWorld,
+    );
+    expect(manifest.keyframes[0]?.cameraLookAt).toEqual(
+      updatedPose.lookAtWorld,
+    );
+    expect(manifest.keyframes[0]?.fovDeg).toBe(90);
+    expect(manifest.keyframes[0]?.aspect).toBe(1.0);
+  });
 });

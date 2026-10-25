@@ -16,6 +16,8 @@ import {
   DEG_TO_RAD,
   getAttendeeTorsoProxyWorldBox,
   getTargetSamplePointsWorld,
+  yawDegToForwardVector,
+  yawDegToRightVector,
   type ProfileId,
   type ProxyPrimitive,
   type SceneObject,
@@ -64,16 +66,16 @@ export function getProxyWorldTransform(
   obj: SceneObject,
   proxy: ProxyPrimitive,
 ): { centerWorld: Vec3; yawDeg: number } {
-  const rad = obj.transform.yawDeg * DEG_TO_RAD;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
+  const right = yawDegToRightVector(obj.transform.yawDeg);
+  const forward = yawDegToForwardVector(obj.transform.yawDeg);
   const [lx, ly, lz] = proxy.localPosition;
 
-  // Right-handed rotation about +Y (matching yawDegToForwardVector(90°) = [-1, 0, 0]):
-  // x' = x*cos(rad) - z*sin(rad), z' = x*sin(rad) + z*cos(rad)
-  const wx = obj.transform.position[0] + (lx * cos - lz * sin);
+  // Local +X is `right`, Local -Z is `forward` (so Local +Z is `-forward`):
+  // At yawDeg = 90° (facing -X), forward = [-1, 0, 0], so a chair back at lz = +0.22
+  // sits at wx = ox + 0.22 (+X, directly behind the viewer).
+  const wx = obj.transform.position[0] + lx * right[0] - lz * forward[0];
   const wy = obj.transform.position[1] + ly;
-  const wz = obj.transform.position[2] + (lx * sin + lz * cos);
+  const wz = obj.transform.position[2] + lx * right[2] - lz * forward[2];
 
   return {
     centerWorld: [wx, wy, wz],
