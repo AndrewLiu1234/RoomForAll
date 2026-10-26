@@ -1778,51 +1778,9 @@ export function parseAndLabelGlbVenue(
   const hasClassroomDesks = rawNodes.some(
     (n) => n.name === 'Desk_Tier_1' || n.name === 'Wall_Lectern_Podium',
   );
-  if (hasClassroomDesks && standaloneRandomFour) {
-    objects.push(
-      {
-        id: 'wall_lectern_monitor_hood',
-        label: 'Fixed Teaching Lectern Monitor Hood',
-        category: 'fixed_structure',
-        editable: false,
-        transform: { position: [-0.29, 0.0, -2.35], yawDeg: 0 },
-        baselineTransform: { position: [-0.29, 0.0, -2.35], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_wall_lectern_monitor_hood_box',
-            kind: 'box',
-            localPosition: [0.0, 1.05, 0.0],
-            localYawDeg: 0,
-            size: [0.42, 2.1, 0.18],
-            blocksVisibility: true,
-            blocksMovement: false,
-          },
-        ],
-      },
-      {
-        id: 'wall_desk_tier1_apron_right',
-        label: 'Fixed Desk Tier 1 Front Apron',
-        category: 'fixed_structure',
-        editable: false,
-        transform: { position: [1.45, 0.16, -2.18], yawDeg: 0 },
-        baselineTransform: { position: [1.45, 0.16, -2.18], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_wall_desk_tier1_apron_right_box',
-            kind: 'box',
-            localPosition: [0.0, 0.38, 0.0],
-            localYawDeg: 0,
-            size: [0.42, 0.76, 0.22],
-            blocksVisibility: false,
-            blocksMovement: true,
-          },
-        ],
-      },
-    );
-  }
+  void hasClassroomDesks;
 
-  // For standalone .glb scenes (`smallClassroom.glb`, `torium.glb`, `room.glb`), skip all movable props
-  // so repairs strictly shift chairs, walkways, and exits. Keep propGroups only for legacy non-standalone 24-place fixtures.
+  // Skip all welcome signs and movable obstacles so GLB venues contain only building architecture, seats, wheelchair bays, stage/screen, and exits.
   const propGroups = new Map<
     string,
     {
@@ -1837,67 +1795,7 @@ export function parseAndLabelGlbVenue(
     }
   >();
 
-  if (!standaloneRandomFour) {
-    for (const prop of rawPropNodes) {
-      const pMinX = prop.positionWorld[0] - prop.sizeWorld[0] * 0.5;
-      const pMaxX = prop.positionWorld[0] + prop.sizeWorld[0] * 0.5;
-      const pMinY = Math.max(0, prop.positionWorld[1]);
-      const pMaxY = Math.max(0.3, prop.positionWorld[1] + prop.sizeWorld[1]);
-      const pMinZ = prop.positionWorld[2] - prop.sizeWorld[2] * 0.5;
-      const pMaxZ = prop.positionWorld[2] + prop.sizeWorld[2] * 0.5;
-      propGroups.set(prop.name, {
-        id: prop.name,
-        minX: pMinX,
-        maxX: pMaxX,
-        minY: pMinY,
-        maxY: pMaxY,
-        minZ: pMinZ,
-        maxZ: pMaxZ,
-        yawDeg: prop.yawDeg,
-      });
-    }
-  }
-
-  for (const composite of propGroups.values()) {
-    const cx = Number(((composite.minX + composite.maxX) * 0.5).toFixed(4));
-    const cz = Number(((composite.minZ + composite.maxZ) * 0.5).toFixed(4));
-    const sx = Number(
-      Math.max(0.2, composite.maxX - composite.minX).toFixed(4),
-    );
-    const sy = Number(
-      Math.max(0.3, composite.maxY - composite.minY).toFixed(4),
-    );
-    const sz = Number(
-      Math.max(0.16, composite.maxZ - composite.minZ).toFixed(4),
-    );
-    const blocksVis = composite.maxY >= 1.0;
-
-    objects.push({
-      id: composite.id,
-      label: `Movable Prop (${composite.id})`,
-      category: 'movable_prop',
-      editable: !standaloneRandomFour,
-      transform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
-      baselineTransform: { position: [cx, 0.0, cz], yawDeg: composite.yawDeg },
-      allowedBounds: {
-        minX: Number((roomBounds.min[0] + 0.1).toFixed(2)),
-        maxX: Number((roomBounds.max[0] - 0.1).toFixed(2)),
-        minZ: Number((roomBounds.min[2] + 0.1).toFixed(2)),
-        maxZ: Number((roomBounds.max[2] - 0.1).toFixed(2)),
-      },
-      proxies: [
-        {
-          id: `proxy_${composite.id}_box`,
-          kind: 'box',
-          localPosition: [0.0, Number((sy * 0.5).toFixed(4)), 0.0],
-          localYawDeg: 0,
-          size: [sx, sy, sz],
-          blocksVisibility: blocksVis,
-          blocksMovement: true,
-        },
-      ],
-    });
-  }
+  void rawPropNodes;
 
   const entrancePoint: Vec2 =
     resolvedExits.length > 0
@@ -2011,6 +1909,13 @@ export function parseAndLabelGlbVenue(
 
     const groupId = `group_row_${rowNum}`;
     const memberIds: string[] = [];
+    const sortedRowYs = rowSeats
+      .map((s) => s.positionWorld[1])
+      .sort((a, b) => a - b);
+    const rowMedianY = Math.max(
+      standaloneRandomFour ? 0.05 : 0,
+      sortedRowYs[Math.floor(sortedRowYs.length / 2)] ?? 0,
+    );
 
     rowSeats.forEach((seat, cIdx) => {
       const colNum = cIdx + 1;
@@ -2019,7 +1924,13 @@ export function parseAndLabelGlbVenue(
         ? objId.replace('obj_chair_', 'place_chair_')
         : `place_chair_r${rowNum}_c${colNum}`;
       const seatX = seat.positionWorld[0];
-      const seatY = Math.max(0, Number(seat.positionWorld[1].toFixed(3)));
+      const rawSeatY = seat.positionWorld[1];
+      const normalizedRawY =
+        standaloneRandomFour &&
+        (rawSeatY < 0.05 || Math.abs(rawSeatY - rowMedianY) > 0.22)
+          ? rowMedianY
+          : Math.max(standaloneRandomFour ? 0.05 : 0, rawSeatY);
+      const seatY = Number(normalizedRawY.toFixed(3));
       const seatZ = seat.positionWorld[2];
       const anchorZ = isLastRow ? rearCorridorZ : aisleZ;
 
@@ -2041,8 +1952,7 @@ export function parseAndLabelGlbVenue(
         if (d > 0.05 && d < minNeighborDist) minNeighborDist = d;
       }
 
-      const useStandardPlaceFootprint =
-        standaloneRandomFour && seatNodes.length <= 400;
+      const useStandardPlaceFootprint = seatNodes.length <= 400;
       const adaptiveWidthM = useStandardPlaceFootprint
         ? 0.6
         : Number(

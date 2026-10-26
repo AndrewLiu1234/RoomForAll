@@ -209,18 +209,18 @@ export function createArticulatedAvatarMesh(
   rootMesh.add(createArmPivot('left'));
   rootMesh.add(createArmPivot('right'));
 
-  // 4. Pelvis + Articulated Legs (Seated pose by default; transitions to standing/walking during egress)
+  // 4. Pelvis + Articulated Legs (Seated pose by default; positioned on top of the 0.47m chair cushion so avatars never sink through seats or floor)
   const pelvisGeo = new THREE.BoxGeometry(
     chestWidth * 0.94,
-    0.11,
-    chestDepth * 0.95,
+    0.1,
+    chestDepth * 0.92,
   );
   const pelvisMesh = new THREE.Mesh(pelvisGeo, darkSlacksMat);
-  pelvisMesh.position.set(0, -chestHeight * 0.5 - 0.04, 0);
+  pelvisMesh.position.set(0, -chestHeight * 0.5 - 0.015, -0.055);
   rootMesh.add(pelvisMesh);
 
-  const thighLen = profileId === 'extra_legroom' ? 0.36 : 0.31;
-  const calfLen = profileId === 'extra_legroom' ? 0.36 : 0.31;
+  const thighLen = profileId === 'extra_legroom' ? 0.34 : 0.3;
+  const calfLen = profileId === 'extra_legroom' ? 0.32 : 0.285;
   const legRadius = 0.048;
 
   const createLegPivot = (side: 'left' | 'right'): THREE.Group => {
@@ -229,8 +229,8 @@ export function createArticulatedAvatarMesh(
     hipPivot.name = `avatar_leg_${side}`;
     hipPivot.position.set(
       sign * (chestWidth * 0.27),
-      -chestHeight * 0.5 - 0.06,
-      0,
+      -chestHeight * 0.5 - 0.02,
+      -0.055,
     );
     // Seated default: thigh extends forward along -Z (rotation.x = +Math.PI/2)
     hipPivot.rotation.x = Math.PI * 0.48;
