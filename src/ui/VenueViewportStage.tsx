@@ -482,6 +482,7 @@ export function VenueViewportStage({
             align.position[2],
           );
           let anyObjectModified = false;
+          const movedHorizontallyIds = new Set<string>();
           for (const obj of snapshot.objects) {
             const dx =
               obj.transform.position[0] - obj.baselineTransform.position[0];
@@ -502,6 +503,7 @@ export function VenueViewportStage({
                 if (obj.category === 'movable_prop' && dy < -0.15) {
                   targetNode.visible = false;
                 } else {
+                  movedHorizontallyIds.add(obj.id);
                   targetNode.position.x += dx;
                   targetNode.position.y += dy;
                   targetNode.position.z += dz;
@@ -511,10 +513,18 @@ export function VenueViewportStage({
             }
           }
           // When a repair patch has been applied to a standalone .glb auditorium/classroom,
-          // ensure all remaining Flaw_* and Obs_* obstruction meshes in the 3D scene are removed/hidden!
+          // keep horizontally relocated props visible at their new positions and remove/hide the remaining Flaw_*/Obs_* clutter!
           if (anyObjectModified) {
             archGroup.traverse((child) => {
-              const lower = (child.name || '').toLowerCase();
+              const name = child.name || '';
+              if (movedHorizontallyIds.has(name)) return;
+              // Also preserve children of a horizontally moved parent group/mesh
+              let p = child.parent;
+              while (p) {
+                if (movedHorizontallyIds.has(p.name || '')) return;
+                p = p.parent;
+              }
+              const lower = name.toLowerCase();
               if (lower.includes('flaw') || lower.startsWith('obs_')) {
                 child.visible = false;
               }
