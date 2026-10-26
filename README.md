@@ -1,6 +1,6 @@
-# VenuePilot — Existing Venue Accessibility and Viewing Review
+# RoomForAll — Existing Venue Accessibility and Viewing Review
 
-VenuePilot imports a prepared single-level venue layout, evaluates audience access, sightlines, and explicit comfort requirements across four audience profiles, records real first-person and overview inspection media, asks Gemini 4 Argon to diagnose obstructions and propose a bounded JSON seating/prop patch, verifies the candidate layout deterministically, and performs a final visual reinspection.
+RoomForAll imports a prepared single-level venue layout, evaluates audience access, sightlines, and explicit comfort requirements across four audience profiles, records real first-person and overview inspection media, asks Gemini 4 Argon to diagnose obstructions and propose a bounded JSON seating/prop patch, verifies the candidate layout deterministically, and performs a final visual reinspection.
 
 ---
 
