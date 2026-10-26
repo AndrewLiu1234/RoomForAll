@@ -109,15 +109,15 @@ export function populateThreeSceneFromSnapshot(
     : undefined;
 
   if (standaloneGlbGroup) {
-    const clonedGlb = standaloneGlbGroup.clone(true);
-
-    // Apply any repaired chair shifts (transform - baselineTransform) directly onto the 3D .glb chair nodes!
-    const shiftedChairDeltas = new Map<
+    const glbClone = standaloneGlbGroup.clone(true);
+    let anyObjectModified = false;
+    const movedHorizontallyIds = new Set<string>();
+    const shiftedDeltas = new Map<
       string,
-      { dx: number; dy: number; dz: number; dYawRad: number }
+      { dx: number; dy: number; dz: number; dYawRad: number; category: string }
     >();
+
     for (const obj of snapshot.objects) {
-      if (obj.category !== 'movable_chair') continue;
       const dx = obj.transform.position[0] - obj.baselineTransform.position[0];
       const dy = obj.transform.position[1] - obj.baselineTransform.position[1];
       const dz = obj.transform.position[2] - obj.baselineTransform.position[2];
@@ -128,28 +128,50 @@ export function populateThreeSceneFromSnapshot(
         Math.abs(dz) > 1e-4 ||
         Math.abs(dYaw) > 1e-4
       ) {
-        shiftedChairDeltas.set(obj.id, {
+        anyObjectModified = true;
+        shiftedDeltas.set(obj.id, {
           dx,
           dy,
           dz,
           dYawRad: dYaw * DEG_TO_RAD,
+          category: obj.category,
         });
       }
     }
 
-    if (shiftedChairDeltas.size > 0) {
-      clonedGlb.traverse((node) => {
-        const delta = shiftedChairDeltas.get(node.name);
+    if (shiftedDeltas.size > 0) {
+      glbClone.traverse((node) => {
+        const delta = shiftedDeltas.get(node.name);
         if (delta) {
-          node.position.x += delta.dx;
-          node.position.y += delta.dy;
-          node.position.z += delta.dz;
-          node.rotation.y += delta.dYawRad;
+          if (delta.category === 'movable_prop' && delta.dy < -0.15) {
+            node.visible = false;
+          } else {
+            movedHorizontallyIds.add(node.name);
+            node.position.x += delta.dx;
+            node.position.y += delta.dy;
+            node.position.z += delta.dz;
+            node.rotation.y += delta.dYawRad;
+          }
         }
       });
     }
 
-    scene.add(clonedGlb);
+    if (anyObjectModified) {
+      glbClone.traverse((child) => {
+        const name = child.name || '';
+        if (movedHorizontallyIds.has(name)) return;
+        let p = child.parent;
+        while (p) {
+          if (movedHorizontallyIds.has(p.name || '')) return;
+          p = p.parent;
+        }
+        const lower = name.toLowerCase();
+        if (lower.includes('flaw') || lower.startsWith('obs_')) {
+          child.visible = false;
+        }
+      });
+    }
+    scene.add(glbClone);
 
     // Render 3D Walkway Corridor Guidelines along active routes (`snapshot.routes`) so shifted/widened walkways are visible!
     const occupiedRouteIds = new Set(
@@ -189,7 +211,7 @@ export function populateThreeSceneFromSnapshot(
       scene.add(routeLine);
     }
 
-    // Also render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
+    // Render a subtle glowing Sight Target outline frame at snapshot.target so the user can see the parsed Sight Target!
     const target = snapshot.target;
     const targetOutlineGroup = new THREE.Group();
     const zOffset = target.yawDeg === 0 ? -0.015 : 0.015;
@@ -261,7 +283,7 @@ export function populateThreeSceneFromSnapshot(
 
       scene.add(exitPointGroup);
     }
-  } else if (!isStandaloneGlb) {
+  } else {
     // Room floor
     const roomWidth = snapshot.roomBounds.max[0] - snapshot.roomBounds.min[0];
     const roomDepth = snapshot.roomBounds.max[2] - snapshot.roomBounds.min[2];
@@ -603,6 +625,7 @@ export function populateThreeSceneFromSnapshot(
     if (
       isStandaloneGlb &&
       (obj.category === 'movable_chair' ||
+        obj.category === 'movable_prop' ||
         obj.category === 'stage' ||
         obj.category === 'fixed_structure')
     ) {

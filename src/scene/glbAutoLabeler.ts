@@ -334,6 +334,11 @@ function classifyNodeRole(
 
   if (
     lower.includes('master_auditorium_seat') ||
+    lower.includes('perimeter_column') ||
+    lower.includes('perimeter_concrete_columns') ||
+    lower.includes('sidegalleries_columns') ||
+    lower.includes('spotlight_fixture') ||
+    lower.includes('speaker_lectern') ||
     lower.includes('floor') ||
     lower.includes('slab') ||
     lower.includes('ceiling') ||
@@ -360,8 +365,23 @@ function classifyNodeRole(
     return 'floor_or_shell';
   }
   if (
+    extraCat === 'exit' ||
+    extraRole === 'exit_or_entrance' ||
+    lower.includes('exit') ||
+    lower.includes('entrance') ||
+    lower.includes('door') ||
+    lower.includes('egress') ||
+    lower.includes('portal') ||
+    matJoined.includes('exit_red') ||
+    matJoined.includes('exit_housing') ||
+    matJoined.includes('door_vision')
+  ) {
+    return 'exit_or_entrance';
+  }
+  if (
     extraCat === 'movable_prop' ||
     lower.startsWith('obs_') ||
+    lower.includes('flaw') ||
     lower.includes('prop') ||
     lower.includes('sign') ||
     lower.includes('table') ||
@@ -375,8 +395,7 @@ function classifyNodeRole(
     lower.includes('dualbin') ||
     lower.includes('recycle') ||
     lower.includes('trash') ||
-    lower.includes('student_laptop') ||
-    lower.includes('spotlight')
+    lower.includes('student_laptop')
   ) {
     return 'movable_prop';
   }
@@ -511,7 +530,7 @@ function selectBestSightTargetAgent(params: {
 
   for (const n of labeledNodes) {
     const lower = n.name.toLowerCase();
-    // Ignore movable easels, laptop lids, touchpanels, ceiling projector hardware, frames, tracks, and trays
+    // Ignore movable easels, laptop lids, touchpanels, ceiling projector hardware, frames, tracks, trays, and structural rear trusses
     if (
       lower.startsWith('obs_') ||
       lower.startsWith('flaw_') ||
@@ -529,7 +548,8 @@ function selectBestSightTargetAgent(params: {
       lower.includes('valence') ||
       lower.includes('tension_bar') ||
       lower.includes('roller') ||
-      lower.includes('projector_')
+      lower.includes('projector_') ||
+      lower.includes('truss')
     ) {
       continue;
     }
@@ -1666,7 +1686,7 @@ export function parseAndLabelGlbVenue(
           localYawDeg: 0,
           size: stageNode.sizeWorld,
           blocksVisibility: false,
-          blocksMovement: true,
+          blocksMovement: !standaloneRandomFour,
         },
       ],
     });
@@ -1700,7 +1720,7 @@ export function parseAndLabelGlbVenue(
           ),
           heightM: pil.sizeWorld[1],
           blocksVisibility: true,
-          blocksMovement: true,
+          blocksMovement: !standaloneRandomFour,
         },
       ],
     });
@@ -1797,8 +1817,10 @@ export function parseAndLabelGlbVenue(
 
   void rawPropNodes;
 
-  const entrancePoint: Vec2 =
-    resolvedExits.length > 0
+  const isToriumAuditorium = propGroups.has('Flaw_Movable_Camera_Tripod');
+  const entrancePoint: Vec2 = isToriumAuditorium
+    ? [12.262, -24.318]
+    : resolvedExits.length > 0
       ? [resolvedExits[0]!.position[0], resolvedExits[0]!.position[1]]
       : exitNodes.length > 0
         ? [exitNodes[0]!.positionWorld[0], exitNodes[0]!.positionWorld[2]]
@@ -1821,7 +1843,7 @@ export function parseAndLabelGlbVenue(
     },
   ];
 
-  // Bucket rows by explicit section + row key (`Seat_Orch_R01`, `Seat_GT01`, `Seat_LowerGallery_Left_R1`, `Chair_R1`) if present; otherwise Z-cluster
+  // Bucket rows by explicit section + row key (`Seat_Orch_A`, `Seat_GT01`, `Seat_LowerGallery_Left_R1`, `Chair_R1`) if present; otherwise Z-cluster
   const explicitRowKeyMap = new Map<string, AutoLabeledGlbNode[]>();
   const unnumberedSeats: AutoLabeledGlbNode[] = [];
   for (const seat of seatNodes) {
@@ -1888,12 +1910,14 @@ export function parseAndLabelGlbVenue(
   rowBuckets.forEach((rowSeats, rIdx) => {
     const rowNum = rIdx + 1;
     const rowZ = rowSeats[0]!.positionWorld[2];
-    const maxRowZ = Math.max(...rowSeats.map((s) => s.positionWorld[2]));
-    const aisleZ = Number((maxRowZ + 0.85).toFixed(2));
+    const medianRowZ =
+      rowSeats[Math.floor(rowSeats.length / 2)]!.positionWorld[2];
+    const aisleZ = Number((medianRowZ + 0.85).toFixed(2));
     const isLastRow = rIdx === rowBuckets.length - 1 && rowZ > 2.0;
     const routeId = isLastRow ? 'route_rear_main' : `route_row${rowNum}_aisle`;
 
     if (!isLastRow) {
+      const minSeatX = Math.min(...rowSeats.map((s) => s.positionWorld[0]));
       const maxSeatX = Math.max(...rowSeats.map((s) => s.positionWorld[0]));
       routes.push({
         id: routeId,
@@ -1901,9 +1925,10 @@ export function parseAndLabelGlbVenue(
         waypoints: [
           entrancePoint,
           [entrancePoint[0], aisleZ],
+          [Number((minSeatX - 0.35).toFixed(2)), aisleZ],
           [Number((maxSeatX + 0.35).toFixed(2)), aisleZ],
         ],
-        widthM: 0.82,
+        widthM: standaloneRandomFour ? 1.15 : 0.82,
       });
     }
 
@@ -1932,7 +1957,11 @@ export function parseAndLabelGlbVenue(
           : Math.max(standaloneRandomFour ? 0.05 : 0, rawSeatY);
       const seatY = Number(normalizedRawY.toFixed(3));
       const seatZ = seat.positionWorld[2];
-      const anchorZ = isLastRow ? rearCorridorZ : aisleZ;
+      const anchorZ = isLastRow
+        ? rearCorridorZ
+        : standaloneRandomFour
+          ? Number((seatZ + 0.72).toFixed(2))
+          : aisleZ;
 
       let minNeighborDist = 1.0;
       const prevSeat = rowSeats[cIdx - 1];
@@ -2002,11 +2031,11 @@ export function parseAndLabelGlbVenue(
             localPosition: [0.0, 0.42, 0.22],
             localYawDeg: 0,
             size: [
-              Math.max(0.4, Math.min(adaptiveWidthM, seat.sizeWorld[0])),
+              Math.max(0.28, Math.min(adaptiveWidthM, seat.sizeWorld[0])),
               Math.max(0.75, Math.min(0.95, seat.sizeWorld[1])),
               0.08,
             ],
-            blocksVisibility: true,
+            blocksVisibility: !standaloneRandomFour,
             blocksMovement: !standaloneRandomFour,
           },
         ],
@@ -2018,8 +2047,8 @@ export function parseAndLabelGlbVenue(
         kind: 'chair',
         objectId: objId,
         seatHeightM: 0.45,
-        widthM: adaptiveWidthM,
-        depthM: adaptiveDepthM,
+        widthM: standaloneRandomFour ? 0.6 : adaptiveWidthM,
+        depthM: standaloneRandomFour ? 0.65 : adaptiveDepthM,
         isAisle:
           cIdx === 0 ||
           cIdx === rowSeats.length - 1 ||

@@ -35,7 +35,7 @@ function makePatch(
 
 describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () => {
   describe('1. Dev Fixture Baseline & Single-Step Repair', () => {
-    it('evaluates createDevFixtureSnapshot() with att_shorter_01 occluded by obj_chair_r1_c1 and all other profiles clear and usable', () => {
+    it('evaluates createDevFixtureSnapshot() with att_shorter_01 occluded by obj_prop_sign_01 and all other profiles clear and usable', () => {
       const snapshot = createDevFixtureSnapshot();
       const evalResult = evaluateScene(snapshot);
 
@@ -50,7 +50,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       expect(shorter.visibleSamples).toBeLessThan(VISIBILITY_CLEAR_MIN_SAMPLES);
       expect(shorter.totalSamples).toBe(VISIBILITY_TOTAL_SAMPLES);
       expect(shorter.isViewClear).toBe(false);
-      expect(shorter.primaryBlockerIds).toContain('obj_chair_r1_c1');
+      expect(shorter.primaryBlockerIds).toContain('obj_prop_sign_01');
       expect(shorter.routeStatus).toBe('clear');
       expect(shorter.footprintFitPass).toBe(true);
       expect(shorter.legroomPass).toBe(true);
@@ -82,17 +82,17 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       expect(evalResult.comparison.totalFailedRequirementChecks).toBe(1);
     });
 
-    it('repairs att_shorter_01 sightline in a single valid patch moving obj_chair_r1_c1 by [-0.55, 0, 0] and accepts via compareEvaluations', () => {
+    it('repairs att_shorter_01 sightline in a single valid patch moving obj_prop_sign_01 by [-0.55, 0, 0] and accepts via compareEvaluations', () => {
       const baselineSnapshot = createDevFixtureSnapshot();
       const baselineEval = evaluateScene(baselineSnapshot);
 
       const patch = makePatch(baselineSnapshot.sceneHash, [
         {
           targetType: 'object',
-          targetId: 'obj_chair_r1_c1',
+          targetId: 'obj_prop_sign_01',
           deltaPositionM: [-0.55, 0, 0],
           deltaYawDeg: 0,
-          reason: 'Shift Row 1 Left Chair left to clear shorter seated viewer sightline',
+          reason: 'Shift welcome sign left to clear shorter seated viewer sightline',
         },
       ]);
 
@@ -149,19 +149,17 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
     it('shifts chair-user eye height when place.seatHeightM increases while leaving wheelchair_user independent eye height unchanged', () => {
       const snap = createDevFixtureSnapshot();
       for (const place of snap.places) {
-        if (place.id === 'place_chair_r2_c1') {
-          place.seatHeightM += 0.25;
-        }
+        place.seatHeightM += 0.25;
       }
       const updated = withUpdatedSceneHash(snap);
       const evaluation = evaluateScene(updated);
 
-      // Reference adult at R1-1 (seatHeightM 0.45): 0.45 + 0.78 = 1.23
+      // Reference adult: (0.45 + 0.25) + 0.78 = 1.48
       expect(
         evaluation.attendees['att_adult_01']!.eyePositionWorld[1],
-      ).toBeCloseTo(1.23, 4);
+      ).toBeCloseTo(1.48, 4);
 
-      // Shorter viewer at R2-1: (0.45 + 0.25) + 0.52 = 1.22 -> now sees over Row 1!
+      // Shorter viewer: (0.45 + 0.25) + 0.52 = 1.22 -> now sees over the 1.15m sign!
       expect(
         evaluation.attendees['att_shorter_01']!.eyePositionWorld[1],
       ).toBeCloseTo(1.22, 4);
@@ -175,12 +173,12 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
   });
 
   describe('3. Route & Bay Approach Checks', () => {
-    it('flags routeStatus = blocked when an object is moved into an attendee final-approach corridor', () => {
+    it('flags routeStatus = blocked when a prop is moved into an attendee final-approach corridor', () => {
       const snap = createDevFixtureSnapshot();
-      // Move obj_chair_r1_c1 into place_chair_r2_c1's final approach ([0, 1.8] -> [0, 0.825])
-      const chair = snap.objects.find((o) => o.id === 'obj_chair_r1_c1')!;
-      chair.transform.position = [0.0, 0.0, 1.25];
-      chair.allowedBounds = { minX: -3.0, maxX: 3.0, minZ: -3.2, maxZ: 2.5 };
+      // Move obj_prop_sign_01 into place_chair_r2_c1's final approach ([0, 1.8] -> [0, 0.825])
+      const sign = snap.objects.find((o) => o.id === 'obj_prop_sign_01')!;
+      sign.transform.position = [0.0, 0.0, 1.25];
+      sign.allowedBounds = { minX: -3.0, maxX: 3.0, minZ: -3.2, maxZ: 2.5 };
 
       const evalBlocked = evaluateScene(withUpdatedSceneHash(snap));
       expect(evalBlocked.isValidStructure).toBe(true);
@@ -357,7 +355,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
         makePatch(snap.sceneHash, [
           {
             targetType: 'object',
-            targetId: 'obj_chair_r1_c1',
+            targetId: 'obj_prop_sign_01',
             deltaPositionM: [0.13, 0, 0],
             deltaYawDeg: 0,
             reason: 'non-0.05m step',
@@ -373,7 +371,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
         makePatch(snap.sceneHash, [
           {
             targetType: 'object',
-            targetId: 'obj_chair_r1_c1',
+            targetId: 'obj_prop_sign_01',
             deltaPositionM: [0.65, 0, 0],
             deltaYawDeg: 0,
             reason: 'exceeds 0.60m axis delta',
@@ -389,7 +387,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
         makePatch(snap.sceneHash, [
           {
             targetType: 'object',
-            targetId: 'obj_chair_r1_c1',
+            targetId: 'obj_prop_sign_01',
             deltaPositionM: [0, 0, 0],
             deltaYawDeg: 12,
             reason: 'exceeds 10 deg yaw',
@@ -403,15 +401,15 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
     it('rejects cumulative displacement > 1.50m from frozen baseline across sequential patches', () => {
       const baseline = createDevFixtureSnapshot();
 
-      // Step 1: move +0.60m in X (from 0.00m to +0.60m)
+      // Step 1: move -0.60m in Z (towards stage, open floor)
       const step1 = applyAndValidatePatch(
         baseline,
         baseline,
         makePatch(baseline.sceneHash, [
           {
             targetType: 'object',
-            targetId: 'obj_chair_r2_c1',
-            deltaPositionM: [0.6, 0, 0],
+            targetId: 'obj_prop_sign_01',
+            deltaPositionM: [0, 0, -0.6],
             deltaYawDeg: 0,
             reason: 'step 1',
           },
@@ -419,15 +417,15 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       );
       expect(step1.valid).toBe(true);
 
-      // Step 2: move another +0.60m in X (to +1.20m, total 1.20m <= 1.50m)
+      // Step 2: move another -0.60m in Z (total 1.20m <= 1.50m)
       const step2 = applyAndValidatePatch(
         baseline,
         step1.snapshot!,
         makePatch(step1.snapshot!.sceneHash, [
           {
             targetType: 'object',
-            targetId: 'obj_chair_r2_c1',
-            deltaPositionM: [0.6, 0, 0],
+            targetId: 'obj_prop_sign_01',
+            deltaPositionM: [0, 0, -0.6],
             deltaYawDeg: 0,
             reason: 'step 2',
           },
@@ -435,15 +433,15 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       );
       expect(step2.valid).toBe(true);
 
-      // Step 3: move another +0.40m in X (total 1.60m > 1.50m) -> rejected!
+      // Step 3: move another -0.40m in Z (total 1.60m > 1.50m) -> rejected!
       const step3 = applyAndValidatePatch(
         baseline,
         step2.snapshot!,
         makePatch(step2.snapshot!.sceneHash, [
           {
             targetType: 'object',
-            targetId: 'obj_chair_r2_c1',
-            deltaPositionM: [0.4, 0, 0],
+            targetId: 'obj_prop_sign_01',
+            deltaPositionM: [0, 0, -0.4],
             deltaYawDeg: 0,
             reason: 'step 3 exceeds 1.50m cumulative displacement',
           },
@@ -523,7 +521,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       const c2 = res.snapshot!.objects.find(
         (o) => o.id === 'obj_chair_r1_c2',
       )!;
-      expect(c1.transform.position[0]).toBeCloseTo(-0.25, 4);
+      expect(c1.transform.position[0]).toBeCloseTo(-1.1, 4);
       expect(c1.transform.position[2]).toBeCloseTo(-0.85, 4);
       expect(c2.transform.position[0]).toBeCloseTo(1.3, 4);
       expect(c2.transform.position[2]).toBeCloseTo(-0.85, 4);
@@ -535,30 +533,11 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       const baselineSnap = createDevFixtureSnapshot();
       const baselineEval = evaluateScene(baselineSnap);
 
-      // Add a fixed structural column in front of place_chair_r1_c2 (extra_legroom seat at [1.2, 0, -0.8])
-      // while shifting obj_chair_r1_c1 to [-0.90, 0, -0.8] so att_shorter_01 has 135/135 view:
+      // Move obj_prop_sign_01 directly in front of place_chair_r1_c2 (extra_legroom seat at [1.2, 0, -0.8]):
+      // This clears att_shorter_01's view (135/135!), but intrudes into att_extra_legroom_01's front legroom!
       const candSnap = createDevFixtureSnapshot();
-      const r1c1 = candSnap.objects.find((o) => o.id === 'obj_chair_r1_c1')!;
-      r1c1.transform.position = [-0.9, 0.0, -0.8];
-      candSnap.objects.push({
-        id: 'obj_pillar_front_right',
-        label: 'Structural Column',
-        category: 'fixed_structure',
-        editable: false,
-        transform: { position: [1.2, 0.0, -1.35], yawDeg: 0 },
-        baselineTransform: { position: [1.2, 0.0, -1.35], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_pillar_front_right',
-            kind: 'box',
-            localPosition: [0.0, 0.4, 0.0],
-            localYawDeg: 0,
-            size: [0.36, 0.8, 0.2],
-            blocksVisibility: false,
-            blocksMovement: true,
-          },
-        ],
-      });
+      const sign = candSnap.objects.find((o) => o.id === 'obj_prop_sign_01')!;
+      sign.transform.position = [1.2, 0.0, -1.35];
       const candEval = evaluateScene(withUpdatedSceneHash(candSnap));
 
       expect(candEval.attendees['att_shorter_01']!.visibleSamples).toBe(135);
@@ -575,30 +554,13 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
       const baselineSnap = createDevFixtureSnapshot();
       const baselineEval = evaluateScene(baselineSnap);
 
-      // Shift obj_chair_r1_c1 to [-0.90, 0, -0.8] (so att_shorter_01 improves to 135/135),
-      // while placing a structural column in front of att_adult_01 at [-0.90, 0, -1.8]:
+      // Make sign tall enough (1.40m) and move it in front of att_adult_01 at [-1.2, 0, -1.8]:
+      // att_shorter_01 improves to 135/135, but reference_adult regresses in meanVisibility.
       const candSnap = createDevFixtureSnapshot();
-      const r1c1 = candSnap.objects.find((o) => o.id === 'obj_chair_r1_c1')!;
-      r1c1.transform.position = [-0.9, 0.0, -0.8];
-      candSnap.objects.push({
-        id: 'obj_pillar_front_left',
-        label: 'Structural Column',
-        category: 'fixed_structure',
-        editable: false,
-        transform: { position: [-0.9, 0.0, -1.8], yawDeg: 0 },
-        baselineTransform: { position: [-0.9, 0.0, -1.8], yawDeg: 0 },
-        proxies: [
-          {
-            id: 'proxy_pillar_front_left',
-            kind: 'box',
-            localPosition: [0.0, 0.7, 0.0],
-            localYawDeg: 0,
-            size: [0.6, 1.4, 0.2],
-            blocksVisibility: true,
-            blocksMovement: true,
-          },
-        ],
-      });
+      const sign = candSnap.objects.find((o) => o.id === 'obj_prop_sign_01')!;
+      sign.transform.position = [-1.2, 0.0, -1.8];
+      sign.proxies[0]!.localPosition = [0.0, 0.7, 0.0];
+      sign.proxies[0]!.size = [0.6, 1.4, 0.2];
       const candEval = evaluateScene(withUpdatedSceneHash(candSnap));
 
       expect(candEval.attendees['att_shorter_01']!.isViewClear).toBe(true);
@@ -646,14 +608,14 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
   describe('7. Adversarial Edge Cases (Red-Team Hardening)', () => {
     it('detects occlusion from rotated OBBs and 3D finite cylinder pillars', () => {
       const snap = createDevFixtureSnapshot();
-      // Place a cylinder pillar in front of att_adult_01 (at X=-0.35, Z=-0.8)
+      // Replace the sign box with a 45°-rotated OBB and a cylinder pillar in front of att_adult_01
       snap.objects.push({
         id: 'obj_pillar_cyl',
         label: 'Cylindrical Pillar',
         category: 'fixed_structure',
         editable: false,
-        transform: { position: [-0.35, 0.0, -2.2], yawDeg: 45 },
-        baselineTransform: { position: [-0.35, 0.0, -2.2], yawDeg: 45 },
+        transform: { position: [-1.2, 0.0, -2.2], yawDeg: 45 },
+        baselineTransform: { position: [-1.2, 0.0, -2.2], yawDeg: 45 },
         proxies: [
           {
             id: 'proxy_cyl_01',
@@ -716,7 +678,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
   });
 
   describe('8. Emergency Evacuation & Bunched Row Repair', () => {
-    it('detects row bunching in createBunchedEmergencyVenueSnapshot and repairs via createBunchedEmergencyReferencePatch', async () => {
+    it('detects row bunching and blocked emergency exit in createBunchedEmergencyVenueSnapshot and repairs via createBunchedEmergencyReferencePatch', async () => {
       const {
         createBunchedEmergencyVenueSnapshot,
         createBunchedEmergencyReferencePatch,
@@ -727,7 +689,7 @@ describe('Stream B — Deterministic Geometry, Scoring & Patch Validation', () =
 
       expect(baseEval.isValidStructure).toBe(true);
       expect(baseEval.evacuation).toBeDefined();
-      expect(baseEval.evacuation!.activeExitCount).toBe(2);
+      expect(baseEval.evacuation!.activeExitCount).toBe(1);
       expect(baseEval.evacuation!.totalExitCount).toBe(2);
       expect(baseEval.evacuation!.jammedAttendeeIds.length).toBeGreaterThan(0);
 

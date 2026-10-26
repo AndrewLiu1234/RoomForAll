@@ -63,8 +63,11 @@ export function buildSceneAccessContext(snapshot: SceneSnapshot): {
     }
   }
 
+  const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
   const placeFootprints: PlaceFootprintEntry[] = [];
   for (const place of snapshot.places) {
+    const isOccupied = occupiedPlaceIds.has(place.id);
+    if (isStandaloneGlb && !isOccupied) continue;
     const obj = objectMap.get(place.objectId);
     if (!obj) continue;
     placeFootprints.push({
@@ -74,7 +77,7 @@ export function buildSceneAccessContext(snapshot: SceneSnapshot): {
         kind: 'obb',
         obb: getPlaceFootprintOBB2D(place, obj),
       },
-      isOccupied: occupiedPlaceIds.has(place.id),
+      isOccupied,
     });
   }
 

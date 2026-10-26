@@ -98,9 +98,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row1_aisle',
     routeAnchorX: -1.15,
     routeAnchorZ: -1.15,
-    profileId: 'shorter_seated',
-    attendeeId: 'att_shorter_02',
-    attendeeLabel: 'Riley Gomez (Shorter Viewer)',
+    profileId: 'reference_adult',
+    attendeeId: 'att_adult_02',
+    attendeeLabel: 'Jordan Smith (Reference Adult)',
   },
   {
     index: 3,
@@ -176,9 +176,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row2_aisle',
     routeAnchorX: -1.55,
     routeAnchorZ: 0.55,
-    profileId: 'shorter_seated',
-    attendeeId: 'att_shorter_04',
-    attendeeLabel: 'Charlie Wu (Shorter Viewer)',
+    profileId: 'reference_adult',
+    attendeeId: 'att_adult_03',
+    attendeeLabel: 'Charlie Wu (Reference Adult)',
   },
   {
     index: 8,
@@ -191,9 +191,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row2_aisle',
     routeAnchorX: -0.55,
     routeAnchorZ: 0.55,
-    profileId: 'shorter_seated',
-    attendeeId: 'att_shorter_03',
-    attendeeLabel: 'Avery Lin (Shorter Viewer)',
+    profileId: 'reference_adult',
+    attendeeId: 'att_adult_04',
+    attendeeLabel: 'Avery Lin (Reference Adult)',
   },
   {
     index: 9,
@@ -207,7 +207,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeAnchorX: 0.55,
     routeAnchorZ: 0.55,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_03',
+    attendeeId: 'att_adult_05',
     attendeeLabel: 'Devon Okafor (Reference Adult)',
   },
   {
@@ -222,7 +222,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeAnchorX: 1.55,
     routeAnchorZ: 0.55,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_04',
+    attendeeId: 'att_adult_06',
     attendeeLabel: 'Jamie Vance (Reference Adult)',
   },
   {
@@ -237,7 +237,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeAnchorX: 2.35,
     routeAnchorZ: 0.55,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_05',
+    attendeeId: 'att_adult_07',
     attendeeLabel: 'Quinn Shah (Reference Adult)',
   },
 
@@ -269,9 +269,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row3_aisle',
     routeAnchorX: -1.95,
     routeAnchorZ: 2.25,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_02',
-    attendeeLabel: 'Blair Chen (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_02',
+    attendeeLabel: 'Riley Gomez (Shorter Viewer)',
   },
   {
     index: 14,
@@ -284,9 +284,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row3_aisle',
     routeAnchorX: -0.95,
     routeAnchorZ: 2.25,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_06',
-    attendeeLabel: 'Hayden Novak (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_03',
+    attendeeLabel: 'Hayden Novak (Shorter Viewer)',
   },
   {
     index: 15,
@@ -299,9 +299,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row3_aisle',
     routeAnchorX: 0.95,
     routeAnchorZ: 2.25,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_07',
-    attendeeLabel: 'Parker Silva (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_04',
+    attendeeLabel: 'Parker Silva (Shorter Viewer)',
   },
   {
     index: 16,
@@ -314,9 +314,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row3_aisle',
     routeAnchorX: 1.95,
     routeAnchorZ: 2.25,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_08',
-    attendeeLabel: 'Reese Kaur (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_05',
+    attendeeLabel: 'Reese Kaur (Shorter Viewer)',
   },
   {
     index: 17,
@@ -329,9 +329,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_row3_aisle',
     routeAnchorX: 2.75,
     routeAnchorZ: 2.25,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_09',
-    attendeeLabel: 'Skyler Cho (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_06',
+    attendeeLabel: 'Skyler Cho (Shorter Viewer)',
   },
 
   // Row 4 (Z = +3.10m) — 5 center chairs: X = -1.60, -0.80, 0.00, +0.80, +1.60
@@ -348,7 +348,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeAnchorX: -1.60,
     routeAnchorZ: 5.35,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_10',
+    attendeeId: 'att_adult_08',
     attendeeLabel: 'Emerson Bell (Reference Adult)',
   },
   {
@@ -362,9 +362,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_rear_main',
     routeAnchorX: -0.80,
     routeAnchorZ: 5.35,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_11',
-    attendeeLabel: 'Finley Diaz (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_07',
+    attendeeLabel: 'Dakota Cruz (Shorter Viewer)',
   },
   {
     index: 20,
@@ -378,8 +378,8 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeAnchorX: 0.00,
     routeAnchorZ: 5.35,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_12',
-    attendeeLabel: 'Rowan Park (Reference Adult)',
+    attendeeId: 'att_adult_09',
+    attendeeLabel: 'Cameron Diaz (Reference Adult)',
   },
   {
     index: 21,
@@ -392,9 +392,9 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeId: 'route_rear_main',
     routeAnchorX: 0.80,
     routeAnchorZ: 5.35,
-    profileId: 'reference_adult',
-    attendeeId: 'att_adult_13',
-    attendeeLabel: 'Sage Ortiz (Reference Adult)',
+    profileId: 'shorter_seated',
+    attendeeId: 'att_shorter_08',
+    attendeeLabel: 'Finley Harper (Shorter Viewer)',
   },
   {
     index: 22,
@@ -408,7 +408,7 @@ const CHAIR_SEAT_SPECS: SeatSpec[] = [
     routeAnchorX: 1.60,
     routeAnchorZ: 5.35,
     profileId: 'reference_adult',
-    attendeeId: 'att_adult_14',
+    attendeeId: 'att_adult_10',
     attendeeLabel: 'Kendall Hassan (Reference Adult)',
   },
 ];
@@ -856,7 +856,7 @@ export function createPreparedVenueReferencePatch(
         viewId: 'view_overview',
         timestampSec: 0.5,
         observation:
-          'Rows 2 through 4 elevated on tiered stepped platforms (0.10m, 0.20m, 0.30m) with ADA 1:17 aisle ramp, clearing sightlines for all attendee heights.',
+          'Rows 2 through 4 elevated on tiered stepped platforms (0.15m, 0.30m, 0.45m) with ADA-compliant outside ramps, clearing sightlines for all shorter viewers over tall front rows.',
       },
     ],
     operations: [
@@ -887,30 +887,30 @@ export function createPreparedVenueReferencePatch(
       {
         targetType: 'group',
         targetId: 'group_row_2',
-        deltaPositionM: [0, 0.10, 0],
+        deltaPositionM: [0, 0.15, 0],
         deltaYawDeg: 0,
         reason:
-          'Elevate Row 2 by +0.10m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant 1:17 aisle ramp incline.',
+          'Elevate Row 2 by +0.15m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant outside ramp incline.',
       },
       {
         targetType: 'group',
         targetId: 'group_row_3',
-        deltaPositionM: [0, 0.20, 0],
+        deltaPositionM: [0, 0.30, 0],
         deltaYawDeg: 0,
         reason:
-          'Elevate Row 3 by +0.20m on stepped riser platform maintaining equal 0.10m step increments and clear sightlines.',
+          'Elevate Row 3 by +0.30m on stepped riser platform maintaining equal 0.15m step increments, clearing sightlines for all shorter viewers over tall Row 2 adults.',
       },
       {
         targetType: 'group',
         targetId: 'group_row_4',
-        deltaPositionM: [0, 0.30, 0],
+        deltaPositionM: [0, 0.45, 0],
         deltaYawDeg: 0,
         reason:
-          'Elevate Row 4 and Wheelchair Bays by +0.30m on tiered terrace with 5ft ceiling clearance, ensuring full visibility for all viewers.',
+          'Elevate Row 4 and Wheelchair Bays by +0.45m on tiered terrace with 5ft ceiling clearance, ensuring full visibility for all rear viewers.',
       },
     ],
     summary:
-      'Tiered Seating & Accessibility Repair: Shifted welcome sign west, moved catering table north, cleared AV cart from wheelchair turning pad, and elevated Rows 2-4 on equal 0.10m tiered risers with ADA-compliant aisle ramps and 5ft ceiling headroom.',
+      'Tiered Seating & Accessibility Repair: Shifted welcome sign west, moved catering table north, cleared AV cart from wheelchair turning pad, and elevated Rows 2-4 on equal 0.15m stepped risers (+0.15m, +0.30m, +0.45m) with ADA-compliant 1:12.5 outside ramps and 5ft ceiling headroom, clearing sightlines for all shorter viewers over tall front rows.',
   };
 }
 
@@ -1041,26 +1041,26 @@ export function createBunchedEmergencyReferencePatch(
       {
         targetType: 'group',
         targetId: 'group_row_2',
-        deltaPositionM: [0, 0.1, 0.55],
+        deltaPositionM: [0, 0.15, 0.55],
         deltaYawDeg: 0,
         reason:
-          'Space Row 2 back by +0.55m to eliminate row bunching and elevate +0.10m on stepped riser.',
+          'Space Row 2 back by +0.55m to eliminate row bunching and elevate +0.15m on stepped riser.',
       },
       {
         targetType: 'group',
         targetId: 'group_row_3',
-        deltaPositionM: [0, 0.2, 0],
+        deltaPositionM: [0, 0.30, 0],
         deltaYawDeg: 0,
         reason:
-          'Elevate Row 3 by +0.20m on stepped riser platform for tiered sightlines.',
+          'Elevate Row 3 by +0.30m on stepped riser platform maintaining equal 0.15m steps to clear sightlines over Row 2.',
       },
       {
         targetType: 'group',
         targetId: 'group_row_4',
-        deltaPositionM: [0, 0.3, 0],
+        deltaPositionM: [0, 0.45, 0],
         deltaYawDeg: 0,
         reason:
-          'Elevate Row 4 & Wheelchair Terrace by +0.30m maintaining equal 0.10m steps and ADA ramp slope.',
+          'Elevate Row 4 & Wheelchair Terrace by +0.45m maintaining equal 0.15m steps and ADA ramp slope.',
       },
       {
         targetType: 'object',

@@ -296,9 +296,15 @@ export function App(): React.ReactElement {
 
   const handleSelectVenuePreset = (preset: VenuePresetMode): void => {
     if (activeRun && activeRun.state !== 'finished') return;
-    if (preset === 'classroom_50' || preset === 'torium_1528') {
+    if (
+      preset === 'classroom_50' ||
+      preset === 'torium_1528' ||
+      preset === 'torium_glb'
+    ) {
       const targetGlbName =
-        preset === 'torium_1528' ? 'torium.glb' : 'smallClassroom.glb';
+        preset === 'torium_1528' || preset === 'torium_glb'
+          ? 'torium.glb'
+          : 'smallClassroom.glb';
       void (async () => {
         setErrorText(null);
         try {

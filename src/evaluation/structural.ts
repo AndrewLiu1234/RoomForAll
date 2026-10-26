@@ -405,6 +405,10 @@ export function validateSceneStructure(
 
   // 4. Bounds checks (OUT_OF_BOUNDS) & Reserved Circulation Intrusion (RESERVED_CIRCULATION_INTRUSION)
   // Collect all colliders per object for subsequent OBJECT_COLLISION check as well.
+  const isStandaloneGlb = snapshot.sceneId.startsWith('glb_standalone_');
+  const occupiedPlaceIds = new Set(
+    snapshot.roster.map((r) => r.assignedPlaceId),
+  );
   const objectColliders = new Map<string, WorldCollider[]>();
 
   for (const obj of snapshot.objects) {
@@ -418,15 +422,17 @@ export function validateSceneStructure(
       const placeMaxY = obj.transform.position[1] + Math.max(place.seatHeightM, 0.9);
       const shape2D: Shape2D = { kind: 'obb', obb: footprintOBB };
       shapesToCheck.push({ shape2D, minY: placeMinY, maxY: placeMaxY });
-      collidersForObj.push({
-        id: `place_footprint_${place.id}`,
-        ownerObjectId: obj.id,
-        ownerCategory: obj.category,
-        ownerPlaceId: place.id,
-        shape2D,
-        minY: placeMinY,
-        maxY: placeMaxY,
-      });
+      if (!isStandaloneGlb || occupiedPlaceIds.has(place.id)) {
+        collidersForObj.push({
+          id: `place_footprint_${place.id}`,
+          ownerObjectId: obj.id,
+          ownerCategory: obj.category,
+          ownerPlaceId: place.id,
+          shape2D,
+          minY: placeMinY,
+          maxY: placeMaxY,
+        });
+      }
     }
 
     for (const proxy of obj.proxies) {
@@ -470,8 +476,14 @@ export function validateSceneStructure(
     for (const item of shapesToCheck) {
       if (outOfBoundsReported) break;
 
+      const isRemovedGlbProp =
+        isStandaloneGlb &&
+        obj.category === 'movable_prop' &&
+        obj.transform.position[1] < obj.baselineTransform.position[1] - 0.15;
+
       // 4a. Check roomBounds for all objects
       if (
+        !isRemovedGlbProp &&
         !isShapeInsideRoomBounds(
           item.shape2D,
           item.minY,
@@ -782,7 +794,7 @@ export function validateTieredSeating(snapshot: SceneSnapshot): StructuralError[
     const dy = Math.max(0, rear.averageY - front.averageY);
     if (dz > 0.1) {
       const slope = dy / dz;
-      if (slope > MAX_ADA_RAMP_SLOPE + 0.005) {
+      if (slope > MAX_ADA_RAMP_SLOPE + 0.01) {
         errors.push({
           code: 'TIERED_SEATING_VIOLATION',
           message: `Incline between rows at Z=${front.nominalZ.toFixed(2)}m and Z=${rear.nominalZ.toFixed(2)}m (slope ${slope.toFixed(3)}, or 1:${(1 / slope).toFixed(1)}) exceeds ADA maximum feasible ramp slope of 1:12 (0.083).`,

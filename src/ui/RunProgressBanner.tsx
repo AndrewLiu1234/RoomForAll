@@ -13,6 +13,7 @@ import type {
 export type VenuePresetMode =
   | 'prepared_24'
   | 'bunched_emergency_24'
+  | 'torium_glb'
   | 'dev_4'
   | 'classroom_50'
   | 'torium_1528'
@@ -152,6 +153,19 @@ export function RunProgressBanner({
             <button
               type="button"
               className={`vp-segment-btn vp-focusable ${
+                venuePreset === 'torium_glb' || venuePreset === 'torium_1528'
+                  ? 'vp-segment-btn-active'
+                  : ''
+              }`}
+              disabled={isRunning || isCapturingClip}
+              onClick={() => onSelectVenuePreset('torium_glb')}
+              title="Load 1,528-Seat Multi-Level Grand Auditorium (torium.glb) with Orchestra, Grand Tier, and Side Galleries"
+            >
+              Auditorium (torium.glb)
+            </button>
+            <button
+              type="button"
+              className={`vp-segment-btn vp-focusable ${
                 venuePreset === 'classroom_50' ? 'vp-segment-btn-active' : ''
               }`}
               disabled={isRunning || isCapturingClip}
@@ -159,27 +173,6 @@ export function RunProgressBanner({
               title="Load 50-Seat Tiered Classroom (smallClassroom.glb) with 5 curved tiers, Screen_Projection_16x9 target, and 4 random people"
             >
               Classroom · 50 (.glb)
-            </button>
-            <button
-              type="button"
-              className={`vp-segment-btn vp-focusable ${
-                venuePreset === 'torium_1528' ? 'vp-segment-btn-active' : ''
-              }`}
-              disabled={isRunning || isCapturingClip}
-              onClick={() => onSelectVenuePreset('torium_1528')}
-              title="Load 1,528-Seat Multi-Level Grand Auditorium (torium.glb) with Orchestra, Grand Tier, and Side Galleries"
-            >
-              Torium · 1528 (.glb)
-            </button>
-            <button
-              type="button"
-              className={`vp-segment-btn vp-focusable ${
-                venuePreset === 'dev_4' ? 'vp-segment-btn-active' : ''
-              }`}
-              disabled={isRunning || isCapturingClip}
-              onClick={() => onSelectVenuePreset('dev_4')}
-            >
-              Compact Hall · 4
             </button>
           </div>
         )}

@@ -1,7 +1,7 @@
 {
   "contractVersion": "2.1.0",
   "runId": "run_reference_check",
-  "parentSceneHash": "vp_c63388a75b2bceb9",
+  "parentSceneHash": "vp_ff15d29aa1200205",
   "diagnosis": [
     {
       "attendeeId": "att_shorter_01",
@@ -24,7 +24,7 @@
     {
       "viewId": "view_overview",
       "timestampSec": 0.5,
-      "observation": "Rows 2 through 4 elevated on tiered stepped platforms (0.10m, 0.20m, 0.30m) with ADA 1:17 aisle ramp, clearing sightlines for all attendee heights."
+      "observation": "Rows 2 through 4 elevated on tiered stepped platforms (0.15m, 0.30m, 0.45m) with ADA-compliant outside ramps, clearing sightlines for all shorter viewers over tall front rows."
     }
   ],
   "operations": [
@@ -66,34 +66,34 @@
       "targetId": "group_row_2",
       "deltaPositionM": [
         0,
-        0.1,
+        0.15,
         0
       ],
       "deltaYawDeg": 0,
-      "reason": "Elevate Row 2 by +0.10m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant 1:17 aisle ramp incline."
+      "reason": "Elevate Row 2 by +0.15m on stepped riser platform to create tiered sightlines over Row 1 with ADA-compliant outside ramp incline."
     },
     {
       "targetType": "group",
       "targetId": "group_row_3",
       "deltaPositionM": [
         0,
-        0.2,
+        0.3,
         0
       ],
       "deltaYawDeg": 0,
-      "reason": "Elevate Row 3 by +0.20m on stepped riser platform maintaining equal 0.10m step increments and clear sightlines."
+      "reason": "Elevate Row 3 by +0.30m on stepped riser platform maintaining equal 0.15m step increments, clearing sightlines for all shorter viewers over tall Row 2 adults."
     },
     {
       "targetType": "group",
       "targetId": "group_row_4",
       "deltaPositionM": [
         0,
-        0.3,
+        0.45,
         0
       ],
       "deltaYawDeg": 0,
-      "reason": "Elevate Row 4 and Wheelchair Bays by +0.30m on tiered terrace with 5ft ceiling clearance, ensuring full visibility for all viewers."
+      "reason": "Elevate Row 4 and Wheelchair Bays by +0.45m on tiered terrace with 5ft ceiling clearance, ensuring full visibility for all rear viewers."
     }
   ],
-  "summary": "Tiered Seating & Accessibility Repair: Shifted welcome sign west, moved catering table north, cleared AV cart from wheelchair turning pad, and elevated Rows 2-4 on equal 0.10m tiered risers with ADA-compliant aisle ramps and 5ft ceiling headroom."
+  "summary": "Tiered Seating & Accessibility Repair: Shifted welcome sign west, moved catering table north, cleared AV cart from wheelchair turning pad, and elevated Rows 2-4 on equal 0.15m stepped risers (+0.15m, +0.30m, +0.45m) with ADA-compliant 1:12.5 outside ramps and 5ft ceiling headroom, clearing sightlines for all shorter viewers over tall front rows."
 }
